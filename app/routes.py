@@ -6,7 +6,7 @@ main = Blueprint('main', __name__)
 def get_users():
     conn = current_app.config['DB_CONNECTION']
     cur = conn.cursor()
-    cur.execute("SELECT * FROM users;")  # example table
+    cur.execute("SELECT * FROM users;")
     rows = cur.fetchall()
     cur.close()
     return jsonify(rows)
