@@ -1,0 +1,30 @@
+[project]
+name = "donations"
+version = "0.1.0"
+description = "Donations platform (Flask + Postgres + AWS)"
+authors = [
+    {name = "mowahid latif",email = "mowahidlatif@hotmail.com"}
+]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "flask (>=3.1.1,<4.0.0)",
+    "sqlalchemy (>=2.0.42,<3.0.0)",
+    "psycopg[binary] (>=3.2.9,<4.0.0)",
+    "python-dotenv (>=1.1.1,<2.0.0)",
+    "flask-jwt-extended (>=4.7.1,<5.0.0)",
+    "psycopg2-binary (>=2.9.10,<3.0.0)",
+    "bcrypt (>=4.3.0,<5.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.group.dev.dependencies]
+black = "^25.1.0"
+ruff = "^0.12.8"
+pre-commit = "^4.3.0"
+
