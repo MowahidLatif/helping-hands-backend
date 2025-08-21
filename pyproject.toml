@@ -27,4 +27,5 @@ build-backend = "poetry.core.masonry.api"
 black = "^25.1.0"
 ruff = "^0.12.8"
 pre-commit = "^4.3.0"
+alembic = "^1.16.4"
 
