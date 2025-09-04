@@ -3,7 +3,7 @@ import os
 from dotenv import load_dotenv
 from flask_jwt_extended import JWTManager
 from datetime import timedelta
-from app.routes import auth_bp, core, user
+from app.routes import auth_bp, core, user, orgs
 
 # from app.routes import user, campaign, donation, media, auth
 
@@ -50,5 +50,6 @@ def create_app():
     app.register_blueprint(core)
     app.register_blueprint(user, url_prefix="/api/users")
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
+    app.register_blueprint(orgs)
 
     return app

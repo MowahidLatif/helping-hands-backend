@@ -14,8 +14,16 @@
 # from app.routes.core_routes import core
 # from app.routes.user_routes import user
 
+# keep for now but if the new one works, delete all.
+# from .auth_routes import auth_bp
+# from .user_routes import user
+# from .core_routes import core
+
+# __all__ = ["auth_bp", "user", "core"]
+
 from .auth_routes import auth_bp
 from .user_routes import user
 from .core_routes import core
+from .org_routes import orgs
 
-__all__ = ["auth_bp", "user", "core"]
+__all__ = ["auth_bp", "user", "core", "orgs"]
