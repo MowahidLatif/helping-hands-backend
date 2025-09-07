@@ -1,18 +1,31 @@
 from app.utils.db import get_db_connection
+from typing import Any
+from app.utils.slug import slugify
+
 
 def insert_campaign(data):
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("""
+    cur.execute(
+        """
         INSERT INTO campaigns (user_id, title, slug, description, goal_amount)
         VALUES (%s, %s, %s, %s, %s)
         RETURNING *;
-    """, (data['user_id'], data['title'], data['slug'], data.get('description'), data.get('goal_amount')))
+    """,
+        (
+            data["user_id"],
+            data["title"],
+            data["slug"],
+            data.get("description"),
+            data.get("goal_amount"),
+        ),
+    )
     campaign = cur.fetchone()
     conn.commit()
     cur.close()
     conn.close()
     return campaign
+
 
 def select_campaigns():
     conn = get_db_connection()
@@ -23,20 +36,31 @@ def select_campaigns():
     conn.close()
     return rows
 
+
 def update_campaign_data(campaign_id, data):
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("""
+    cur.execute(
+        """
         UPDATE campaigns
         SET title = %s, description = %s, is_completed = %s, goal_amount = %s
         WHERE id = %s
         RETURNING *;
-    """, (data['title'], data['description'], data['is_completed'], data['goal_amount'], campaign_id))
+    """,
+        (
+            data["title"],
+            data["description"],
+            data["is_completed"],
+            data["goal_amount"],
+            campaign_id,
+        ),
+    )
     campaign = cur.fetchone()
     conn.commit()
     cur.close()
     conn.close()
     return campaign
+
 
 def delete_campaign_by_id(campaign_id):
     conn = get_db_connection()
@@ -46,3 +70,157 @@ def delete_campaign_by_id(campaign_id):
     cur.close()
     conn.close()
     return {"status": "deleted"}
+
+
+def _slug_exists(org_id: str, slug: str) -> bool:
+    sql = "SELECT 1 FROM campaigns WHERE org_id = %s AND slug = %s LIMIT 1"
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (org_id, slug))
+        return cur.fetchone() is not None
+
+
+def unique_slug_for_org(org_id: str, base: str) -> str:
+    base_slug = slugify(base)
+    candidate = base_slug
+    i = 2
+    while _slug_exists(org_id, candidate):
+        candidate = f"{base_slug}-{i}"
+        i += 1
+    return candidate
+
+
+def create_campaign(
+    org_id: str,
+    title: str,
+    goal: float = 0.0,
+    status: str = "draft",
+    custom_domain: str | None = None,
+) -> dict[str, Any]:
+    slug = unique_slug_for_org(org_id, title)
+    sql = """
+    INSERT INTO campaigns (org_id, title, slug, goal, status, custom_domain)
+    VALUES (%s, %s, %s, %s, %s, %s)
+    RETURNING id, org_id, title, slug, goal, status, custom_domain, total_raised, created_at, updated_at
+    """
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (org_id, title, slug, goal, status, custom_domain))
+        row = cur.fetchone()
+        conn.commit()
+        cols = [
+            "id",
+            "org_id",
+            "title",
+            "slug",
+            "goal",
+            "status",
+            "custom_domain",
+            "total_raised",
+            "created_at",
+            "updated_at",
+        ]
+        return dict(zip(cols, row))
+
+
+def get_campaign(campaign_id: str) -> dict[str, Any] | None:
+    sql = "SELECT id, org_id, title, slug, goal, status, custom_domain, total_raised, created_at, updated_at FROM campaigns WHERE id = %s"
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (campaign_id,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        cols = [
+            "id",
+            "org_id",
+            "title",
+            "slug",
+            "goal",
+            "status",
+            "custom_domain",
+            "total_raised",
+            "created_at",
+            "updated_at",
+        ]
+        return dict(zip(cols, row))
+
+
+def list_campaigns(org_id: str) -> list[dict[str, Any]]:
+    sql = """
+    SELECT id, org_id, title, slug, goal, status, custom_domain, total_raised, created_at, updated_at
+    FROM campaigns
+    WHERE org_id = %s
+    ORDER BY created_at DESC
+    """
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (org_id,))
+        rows = cur.fetchall()
+        cols = [
+            "id",
+            "org_id",
+            "title",
+            "slug",
+            "goal",
+            "status",
+            "custom_domain",
+            "total_raised",
+            "created_at",
+            "updated_at",
+        ]
+        return [dict(zip(cols, r)) for r in rows]
+
+
+def update_campaign(
+    campaign_id: str,
+    *,
+    title: str | None = None,
+    goal: float | None = None,
+    status: str | None = None,
+    slug: str | None = None,
+    custom_domain: str | None = None,
+) -> dict[str, Any] | None:
+    sets, params = [], []
+    if title is not None:
+        sets.append("title = %s")
+        params.append(title)
+    if goal is not None:
+        sets.append("goal = %s")
+        params.append(goal)
+    if status is not None:
+        sets.append("status = %s")
+        params.append(status)
+    if slug is not None:
+        sets.append("slug = %s")
+        params.append(slugify(slug))
+    if custom_domain is not None:
+        sets.append("custom_domain = %s")
+        params.append(custom_domain)
+    if not sets:
+        return get_campaign(campaign_id)
+    sets.append("updated_at = now()")
+    sql = f"UPDATE campaigns SET {', '.join(sets)} WHERE id = %s RETURNING id, org_id, title, slug, goal, status, custom_domain, total_raised, created_at, updated_at"
+    params.append(campaign_id)
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, tuple(params))
+        row = cur.fetchone()
+        conn.commit()
+        if not row:
+            return None
+        cols = [
+            "id",
+            "org_id",
+            "title",
+            "slug",
+            "goal",
+            "status",
+            "custom_domain",
+            "total_raised",
+            "created_at",
+            "updated_at",
+        ]
+        return dict(zip(cols, row))
+
+
+def delete_campaign(campaign_id: str) -> bool:
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM campaigns WHERE id = %s", (campaign_id,))
+        conn.commit()
+        return cur.rowcount > 0
