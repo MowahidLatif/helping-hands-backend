@@ -5,8 +5,6 @@ from flask_jwt_extended import JWTManager
 from datetime import timedelta
 from app.routes import auth_bp, core, user, orgs
 
-# from app.routes import user, campaign, donation, media, auth
-
 load_dotenv()
 
 
@@ -27,7 +25,6 @@ def create_app():
 
     @app.errorhandler(401)
     def handle_unauth(e):
-        # flask-jwt-extended will also add its own messages; this keeps it clean
         return {"error": "unauthorized"}, 401
 
     app.config["DB_SETTINGS"] = {
@@ -37,15 +34,6 @@ def create_app():
         "password": os.getenv("DB_PASSWORD"),
         "port": os.getenv("DB_PORT"),
     }
-
-    # app.register_blueprint(user, url_prefix="/api/users")
-
-    # app.register_blueprint(campaign, url_prefix="/api/campaigns")
-    # app.register_blueprint(donation, url_prefix="/api/donations")
-    # app.register_blueprint(media, url_prefix="/api/media")
-
-    # app.register_blueprint(auth_bp, url_prefix="/api/auth")
-    # app.register_blueprint(core)
 
     app.register_blueprint(core)
     app.register_blueprint(user, url_prefix="/api/users")
