@@ -149,3 +149,15 @@ def set_status_by_pi(pi_id: str, status: str) -> None:
             (status, pi_id),
         )
         conn.commit()
+
+
+def count_and_last_succeeded(campaign_id: str) -> tuple[int, str | None]:
+    sql = """
+      SELECT COUNT(*)::int AS cnt, MAX(created_at)::text AS last_dt
+      FROM donations
+      WHERE campaign_id = %s AND status = 'succeeded'
+    """
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (campaign_id,))
+        row = cur.fetchone()
+        return (row[0], row[1])

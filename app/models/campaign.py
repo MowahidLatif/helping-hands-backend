@@ -247,3 +247,14 @@ def recompute_total_raised(campaign_id: str) -> dict[str, Any]:
         row = cur.fetchone()
         conn.commit()
         return {"total_raised": row[0]}
+
+
+def get_goal_and_total(campaign_id: str) -> tuple[float, float] | None:
+    sql = "SELECT goal, total_raised FROM campaigns WHERE id = %s"
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (campaign_id,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        # both are NUMERIC in DB; cast to float for JSON
+        return (float(row[0]), float(row[1]))

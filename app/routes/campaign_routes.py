@@ -13,9 +13,14 @@ from app.models.campaign import (
     get_campaign,
     update_campaign,
     delete_campaign,
+    get_goal_and_total,
 )
 from app.utils.slug import slugify
-
+import json
+from app.utils.cache import r
+from app.models.donation import count_and_last_succeeded
+from app.models.media import list_media_for_campaign
+from uuid import UUID
 
 # campaign = Blueprint('campaign', __name__)
 campaigns = Blueprint("campaigns", __name__)
@@ -37,9 +42,17 @@ campaigns = Blueprint("campaigns", __name__)
 #     return delete_campaign(id)
 
 
+def _is_uuid(v: str) -> bool:
+    try:
+        UUID(v)
+        return True
+    except Exception:
+        return False
+
+
 # GET /api/campaigns?org_id=...
 @campaigns.get("/api/campaigns")
-@require_org_role()  # any member can read
+@require_org_role()
 def list_for_org():
     claims = get_jwt()
     org_id = request.args.get("org_id") or claims.get("org_id")
@@ -127,3 +140,42 @@ def delete(campaign_id):
 
     ok = delete_campaign(campaign_id)
     return ("", 204) if ok else (jsonify({"error": "not found"}), 404)
+
+
+@campaigns.get("/api/campaigns/<campaign_id>/progress")
+def campaign_progress(campaign_id):
+    if not _is_uuid(campaign_id):
+        return jsonify({"error": "invalid campaign_id"}), 400
+    key = f"campaign:{campaign_id}:progress:v1"
+    cached = r().get(key)
+    if cached:
+        return jsonify(json.loads(cached)), 200
+
+    vals = get_goal_and_total(campaign_id)
+    if not vals:
+        return jsonify({"error": "campaign not found"}), 404
+    goal, total = vals
+    count, last_dt = count_and_last_succeeded(campaign_id)
+
+    percent = 0.0
+    if goal > 0:
+        percent = round(min(100.0, (total / goal) * 100.0), 2)
+
+    resp = {
+        "campaign_id": campaign_id,
+        "goal": goal,
+        "total_raised": total,
+        "percent": percent,
+        "donations_count": count,
+        "last_donation_at": last_dt,
+    }
+    r().setex(key, 30, json.dumps(resp, default=str))
+    return jsonify(resp), 200
+
+
+@campaigns.get("/api/campaigns/<campaign_id>/media")
+def campaign_media(campaign_id):
+    if not _is_uuid(campaign_id):
+        return jsonify({"error": "invalid campaign_id"}), 400
+    items = list_media_for_campaign(campaign_id)
+    return jsonify(items), 200

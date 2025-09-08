@@ -9,6 +9,7 @@ from app.models.donation import (
     get_donation,
 )
 from app.models.campaign import recompute_total_raised
+from app.utils.cache import r
 
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "").strip()
 
@@ -80,8 +81,15 @@ def process_stripe_event(
             set_status_by_pi(pi_id, new_status)
 
         # recompute campaign total if we know the campaign
+        # if (d and d.get("campaign_id")) or campaign_id:
+        #     recompute_total_raised(d["campaign_id"] if d else campaign_id)
         if (d and d.get("campaign_id")) or campaign_id:
-            recompute_total_raised(d["campaign_id"] if d else campaign_id)
+            cid = d["campaign_id"] if d else campaign_id
+            recompute_total_raised(cid)
+            try:
+                r().delete(f"campaign:{cid}:progress:v1")
+            except Exception:
+                pass
 
         return 200, {"ok": True}
 
