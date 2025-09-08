@@ -101,3 +101,51 @@ def select_donations_by_campaign(campaign_id):
     cur.close()
     conn.close()
     return rows
+
+
+def get_donation_by_pi(pi_id: str) -> dict[str, Any] | None:
+    sql = """SELECT id, org_id, campaign_id, amount_cents, currency, donor_email, status, stripe_payment_intent_id
+             FROM donations WHERE stripe_payment_intent_id = %s"""
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (pi_id,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        cols = [
+            "id",
+            "org_id",
+            "campaign_id",
+            "amount_cents",
+            "currency",
+            "donor_email",
+            "status",
+            "stripe_payment_intent_id",
+        ]
+        return dict(zip(cols, row))
+
+
+def attach_pi_to_donation(donation_id: str, pi_id: str) -> None:
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE donations SET stripe_payment_intent_id=%s, updated_at=now() WHERE id=%s",
+            (pi_id, donation_id),
+        )
+        conn.commit()
+
+
+def set_status_by_id(donation_id: str, status: str) -> None:
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE donations SET status=%s, updated_at=now() WHERE id=%s",
+            (status, donation_id),
+        )
+        conn.commit()
+
+
+def set_status_by_pi(pi_id: str, status: str) -> None:
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE donations SET status=%s, updated_at=now() WHERE stripe_payment_intent_id=%s",
+            (status, pi_id),
+        )
+        conn.commit()

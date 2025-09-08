@@ -5,5 +5,15 @@ from .org_routes import orgs
 from .campaign_routes import campaigns
 from .media_routes import media_bp
 from .donation_routes import donations_bp
+from .webhook_routes import webhooks_bp
 
-__all__ = ["auth_bp", "user", "core", "orgs", "campaigns", "media_bp", "donations_bp"]
+__all__ = [
+    "auth_bp",
+    "user",
+    "core",
+    "orgs",
+    "campaigns",
+    "media_bp",
+    "donations_bp",
+    "webhooks_bp",
+]

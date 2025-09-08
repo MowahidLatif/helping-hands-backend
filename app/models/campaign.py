@@ -224,3 +224,26 @@ def delete_campaign(campaign_id: str) -> bool:
         cur.execute("DELETE FROM campaigns WHERE id = %s", (campaign_id,))
         conn.commit()
         return cur.rowcount > 0
+
+
+def recompute_total_raised(campaign_id: str) -> dict[str, Any]:
+    """
+    Sets campaigns.total_raised to SUM(donations.amount_cents where succeeded) / 100.
+    Returns {"total_raised": Decimal(...)}.
+    """
+    sql = """
+    UPDATE campaigns
+    SET total_raised = (
+      SELECT COALESCE(SUM(amount_cents),0) / 100.0
+      FROM donations
+      WHERE campaign_id = %s AND status = 'succeeded'
+    )::numeric(12,2),
+    updated_at = now()
+    WHERE id = %s
+    RETURNING total_raised
+    """
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (campaign_id, campaign_id))
+        row = cur.fetchone()
+        conn.commit()
+        return {"total_raised": row[0]}
