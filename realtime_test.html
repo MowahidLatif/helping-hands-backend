@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Realtime Test</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  </head>
+  <body>
+    <h1>Campaign feed</h1>
+    <input id="cid" placeholder="campaign_id" style="width: 420px" />
+    <button id="join">Join</button>
+    <pre
+      id="log"
+      style="
+        background: #111;
+        color: #0f0;
+        padding: 12px;
+        height: 300px;
+        overflow: auto;
+      "
+    ></pre>
+
+    <script>
+      const log = (m) => {
+        const el = document.getElementById("log");
+        el.textContent += m + "\n";
+        el.scrollTop = el.scrollHeight;
+      };
+
+      const socket = io("http://127.0.0.1:5000", {
+        // transports: ["websocket"],
+        withCredentials: false,
+      });
+
+      socket.on("connect", () => log("connected " + socket.id));
+      socket.on("connected", (m) => log("server says: " + JSON.stringify(m)));
+      socket.on("joined", (m) => log("joined: " + JSON.stringify(m)));
+      socket.on("left", (m) => log("left: " + JSON.stringify(m)));
+      socket.on("donation", (m) => log("DONATION: " + JSON.stringify(m)));
+
+      document.getElementById("join").onclick = () => {
+        const cid = document.getElementById("cid").value.trim();
+        if (!cid) return alert("enter campaign_id");
+        socket.emit("join_campaign", { campaign_id: cid });
+      };
+    </script>
+  </body>
+</html>

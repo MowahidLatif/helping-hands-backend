@@ -13,6 +13,7 @@ from app.routes import (
     donations_bp,
     webhooks_bp,
 )
+from app.realtime import init_socketio
 
 load_dotenv()
 
@@ -52,5 +53,7 @@ def create_app():
     app.register_blueprint(media_bp)
     app.register_blueprint(donations_bp)
     app.register_blueprint(webhooks_bp)
+
+    init_socketio(app)
 
     return app
