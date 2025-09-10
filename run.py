@@ -1,30 +1,25 @@
 from app import create_app
-from app.realtime import socketio
+from app.realtime import socketio, init_socketio
+import os
 
 app = create_app()
-if __name__ == "__main__":
-    # eventlet server with websockets
-    socketio.run(app, host="127.0.0.1", port=5000, debug=True)
+init_socketio(app)
 
-# poetry run flask:
-#   --app app:create_app --debug run
-#       ---OR---
-#   poetry run flask --app app:create_app --debug run
-# up:
-# 	docker compose --env-file .env.docker up -d
-# down:
-# 	docker compose down
-# logs:
-# 	docker compose logs -f --tail=100
-# nuke:
-# 	docker compose down -v  # WARNING: deletes DB/Redis/S3 data
-# Turn off containers:
-#   docker compose --env-file .env.docker down
-# Deletes all local data:
-#   docker compose down -v
-# Running the containers:
-#   docker compose --env-file .env.docker up -d
-#   docker compose --env-file .env.docker ps
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 5050))  # default to 5050
+    socketio.run(
+        app,
+        host="127.0.0.1",
+        port=port,
+        debug=False,
+        use_reloader=False,
+        log_output=True,
+    )
+
+# app = create_app()
+# if __name__ == "__main__":
+#     # eventlet server with websockets
+#     socketio.run(app, host="127.0.0.1", port=5050, debug=True)
 
 # --- SCHEDULE ---
 

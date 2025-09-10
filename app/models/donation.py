@@ -1,4 +1,5 @@
 from typing import Any
+from typing import List, Dict
 from app.utils.db import get_db_connection
 
 
@@ -161,3 +162,85 @@ def count_and_last_succeeded(campaign_id: str) -> tuple[int, str | None]:
         cur.execute(sql, (campaign_id,))
         row = cur.fetchone()
         return (row[0], row[1])
+
+
+# def list_succeeded_for_campaign(
+#     campaign_id: str, min_amount_cents: int = 0
+# ) -> list[dict[str, Any]]:
+#     """
+#     Return all succeeded donations for a campaign, optionally filtered by a minimum amount.
+#     Ordered by created_at ascending (stable order for draws).
+#     """
+#     sql = """
+#       SELECT id, donor_email, amount_cents, currency, created_at
+#       FROM donations
+#       WHERE campaign_id = %s
+#         AND status = 'succeeded'
+#         AND amount_cents >= %s
+#       ORDER BY created_at ASC
+#     """
+#     with get_db_connection() as conn, conn.cursor() as cur:
+#         cur.execute(sql, (campaign_id, min_amount_cents))
+#         rows = cur.fetchall()
+#         cols = ["id", "donor_email", "amount_cents", "currency", "created_at"]
+#         return [dict(zip(cols, r)) for r in rows]
+
+
+def list_succeeded_for_campaign(
+    campaign_id: str,
+    *,
+    mode: str = "per_donation",
+    min_amount_cents: int = 0,
+) -> List[Dict[str, Any]]:
+    """
+    mode="per_donation": one entry per succeeded donation >= threshold
+    mode="per_donor": one entry per donor whose SUM(amount_cents) meets threshold
+    """
+    if min_amount_cents is None:
+        min_amount_cents = 0
+    min_amount_cents = int(min_amount_cents)
+
+    with get_db_connection() as conn, conn.cursor() as cur:
+        if mode == "per_donor":
+            sql = """
+            SELECT
+              (array_agg(id ORDER BY created_at ASC))[1] AS donation_id,
+              LOWER(donor_email) AS donor_email,
+              SUM(amount_cents)::int AS total_cents
+            FROM donations
+            WHERE campaign_id = %s
+              AND status = 'succeeded'
+              AND donor_email IS NOT NULL
+            GROUP BY LOWER(donor_email)
+            HAVING SUM(amount_cents) >= %s
+            ORDER BY donor_email
+            """
+            cur.execute(sql, (campaign_id, min_amount_cents))
+            rows = cur.fetchall()
+            return [
+                {
+                    "donation_id": r[0],
+                    "donor_email": r[1],
+                    "amount_cents": r[2],
+                }
+                for r in rows
+            ]
+        else:
+            sql = """
+            SELECT id, COALESCE(LOWER(donor_email), NULL) AS donor_email, amount_cents::int
+            FROM donations
+            WHERE campaign_id = %s
+              AND status = 'succeeded'
+              AND amount_cents >= %s
+            ORDER BY created_at
+            """
+            cur.execute(sql, (campaign_id, min_amount_cents))
+            rows = cur.fetchall()
+            return [
+                {
+                    "donation_id": r[0],
+                    "donor_email": r[1],
+                    "amount_cents": r[2],
+                }
+                for r in rows
+            ]

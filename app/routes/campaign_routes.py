@@ -1,4 +1,3 @@
-# from flask import Blueprint, request
 # from app.services.campaign_service import (
 #     create_campaign,
 #     update_campaign,
@@ -20,26 +19,12 @@ import json
 from app.utils.cache import r
 from app.models.donation import count_and_last_succeeded
 from app.models.media import list_media_for_campaign
+from app.services.giveaway_service import draw_winner_for_campaign
 from uuid import UUID
+from app.models.org_user import get_user_role_in_org
+from flask_jwt_extended import get_jwt_identity
 
-# campaign = Blueprint('campaign', __name__)
 campaigns = Blueprint("campaigns", __name__)
-
-# @campaign.route('/campaigns', methods=['POST'])
-# def create():
-#     return create_campaign(request.json)
-
-# @campaign.route('/campaigns', methods=['GET'])
-# def read():
-#     return get_campaigns()
-
-# @campaign.route('/campaigns/<int:id>', methods=['PUT'])
-# def update(id):
-#     return update_campaign(id, request.json)
-
-# @campaign.route('/campaigns/<int:id>', methods=['DELETE'])
-# def delete(id):
-#     return delete_campaign(id)
 
 
 def _is_uuid(v: str) -> bool:
@@ -51,7 +36,7 @@ def _is_uuid(v: str) -> bool:
 
 
 # GET /api/campaigns?org_id=...
-@campaigns.get("/api/campaigns")
+@campaigns.get("/")
 @require_org_role()
 def list_for_org():
     claims = get_jwt()
@@ -61,7 +46,7 @@ def list_for_org():
 
 
 # POST /api/campaigns  { title, goal?, status?, custom_domain?, org_id? }
-@campaigns.post("/api/campaigns")
+@campaigns.post("/")
 @require_org_role("admin", "owner")
 def create():
     body = request.get_json(force=True, silent=True) or {}
@@ -86,7 +71,7 @@ def create():
 
 
 # PATCH /api/campaigns/<id>  { title?, goal?, status?, slug?, custom_domain? }
-@campaigns.patch("/api/campaigns/<campaign_id>")
+@campaigns.patch("/<campaign_id>")
 @jwt_required()  # we'll also assert membership against the campaign's org
 def patch(campaign_id):
     camp = get_campaign(campaign_id)
@@ -94,8 +79,8 @@ def patch(campaign_id):
         return jsonify({"error": "not found"}), 404
 
     # role check against the campaign's org
-    from app.models.org_user import get_user_role_in_org
-    from flask_jwt_extended import get_jwt_identity
+    # from app.models.org_user import get_user_role_in_org
+    # from flask_jwt_extended import get_jwt_identity
 
     role = get_user_role_in_org(get_jwt_identity(), camp["org_id"])
     if role not in ("admin", "owner"):
@@ -124,15 +109,15 @@ def patch(campaign_id):
 
 
 # DELETE /api/campaigns/<id>
-@campaigns.delete("/api/campaigns/<campaign_id>")
+@campaigns.delete("/<campaign_id>")
 @jwt_required()
 def delete(campaign_id):
     camp = get_campaign(campaign_id)
     if not camp:
         return jsonify({"error": "not found"}), 404
 
-    from app.models.org_user import get_user_role_in_org
-    from flask_jwt_extended import get_jwt_identity
+    # from app.models.org_user import get_user_role_in_org
+    # from flask_jwt_extended import get_jwt_identity
 
     role = get_user_role_in_org(get_jwt_identity(), camp["org_id"])
     if role not in ("admin", "owner"):
@@ -142,7 +127,7 @@ def delete(campaign_id):
     return ("", 204) if ok else (jsonify({"error": "not found"}), 404)
 
 
-@campaigns.get("/api/campaigns/<campaign_id>/progress")
+@campaigns.get("/<campaign_id>/progress")
 def campaign_progress(campaign_id):
     if not _is_uuid(campaign_id):
         return jsonify({"error": "invalid campaign_id"}), 400
@@ -173,9 +158,30 @@ def campaign_progress(campaign_id):
     return jsonify(resp), 200
 
 
-@campaigns.get("/api/campaigns/<campaign_id>/media")
+@campaigns.get("/<campaign_id>/media")
 def campaign_media(campaign_id):
     if not _is_uuid(campaign_id):
         return jsonify({"error": "invalid campaign_id"}), 400
     items = list_media_for_campaign(campaign_id)
     return jsonify(items), 200
+
+
+@campaigns.post("/<campaign_id>/draw-winner")
+@jwt_required()
+def draw_winner_route(campaign_id):
+    body = request.get_json(silent=True) or {}
+    mode = body.get("mode", "per_donation")
+    min_amount_cents = int(body.get("min_amount_cents", 0) or 0)
+    notes = body.get("notes")
+
+    claims = get_jwt()
+    user_id = claims.get("sub")
+
+    status, payload = draw_winner_for_campaign(
+        campaign_id=campaign_id,
+        current_user_id=user_id,
+        mode=mode,
+        min_amount_cents=min_amount_cents,
+        notes=notes,
+    )
+    return jsonify(payload), status

@@ -258,3 +258,66 @@ def get_goal_and_total(campaign_id: str) -> tuple[float, float] | None:
             return None
         # both are NUMERIC in DB; cast to float for JSON
         return (float(row[0]), float(row[1]))
+
+
+def get_campaign_by_id(campaign_id: str) -> dict[str, Any] | None:
+    # alias so giveaway_service import works
+    return get_campaign(campaign_id)
+
+
+def insert_giveaway_log(
+    *,
+    org_id: str,
+    campaign_id: str,
+    winner_donation_id: str | None,
+    created_by_user_id: str,
+    mode: str,
+    population_count: int,
+    population_hash: str,
+    notes: str | None = None,
+) -> dict[str, Any]:
+    sql = """
+    INSERT INTO giveaway_logs (
+        org_id,
+        campaign_id,
+        winner_donation_id,
+        created_by_user_id,
+        mode,
+        population_count,
+        population_hash,
+        notes
+    )
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+    RETURNING
+        id, org_id, campaign_id, winner_donation_id,
+        created_by_user_id, mode, population_count, population_hash, notes, created_at
+    """
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            sql,
+            (
+                org_id,
+                campaign_id,
+                winner_donation_id,
+                created_by_user_id,
+                mode,
+                population_count,
+                population_hash,
+                notes,
+            ),
+        )
+        row = cur.fetchone()
+        conn.commit()
+        cols = [
+            "id",
+            "org_id",
+            "campaign_id",
+            "winner_donation_id",
+            "created_by_user_id",
+            "mode",
+            "population_count",
+            "population_hash",
+            "notes",
+            "created_at",
+        ]
+        return dict(zip(cols, row))

@@ -20,6 +20,7 @@ load_dotenv()
 
 def create_app():
     app = Flask(__name__)
+    app.url_map.strict_slashes = False
     app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET")
     app.config["JWT_TOKEN_LOCATION"] = ["headers"]
     app.config["JWT_HEADER_NAME"] = "Authorization"
@@ -49,7 +50,8 @@ def create_app():
     app.register_blueprint(user, url_prefix="/api/users")
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
     app.register_blueprint(orgs)
-    app.register_blueprint(campaigns)
+    # app.register_blueprint(campaigns)
+    app.register_blueprint(campaigns, url_prefix="/api/campaigns")
     app.register_blueprint(media_bp)
     app.register_blueprint(donations_bp)
     app.register_blueprint(webhooks_bp)
