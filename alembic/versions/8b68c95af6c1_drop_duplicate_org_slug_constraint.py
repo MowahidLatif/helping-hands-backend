@@ -1,4 +1,3 @@
-# alembic/versions/<new>_drop_dup_org_slug.py
 from alembic import op
 
 revision = "0004_drop_dup_org_slug"

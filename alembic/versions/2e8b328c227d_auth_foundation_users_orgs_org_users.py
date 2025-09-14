@@ -1,9 +1,7 @@
 from alembic import op
 
-# revision = "0001_auth_foundation"
-# down_revision = None
-revision = "0001_auth_foundation"  # keep as-is (name is fine)
-down_revision = "7079d9406537"  # <-- chain to your base revision ID
+revision = "0001_auth_foundation"
+down_revision = "7079d9406537"
 branch_labels = None
 depends_on = None
 

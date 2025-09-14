@@ -1,6 +1,5 @@
 from alembic import op
 
-# keep your sequence aligned with your chain
 revision = "0007_giveaway_logs"
 down_revision = "0006_donations"
 branch_labels = None

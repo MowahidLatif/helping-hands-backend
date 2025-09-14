@@ -26,14 +26,3 @@ def checkout():
         campaign_id=campaign_id, amount=amount, donor_email=donor_email
     )
     return jsonify(resp), (200 if "clientSecret" in resp else 400)
-
-
-# donation = Blueprint('donation', __name__)
-
-# @donation.route('/donations', methods=['POST'])
-# def donate():
-#     return create_donation(request.json)
-
-# @donation.route('/campaigns/<int:campaign_id>/donations', methods=['GET'])
-# def list_donations(campaign_id):
-#     return get_donations_for_campaign(campaign_id)

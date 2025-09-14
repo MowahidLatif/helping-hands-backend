@@ -1,6 +1,5 @@
 from alembic import op
 
-# revision identifiers
 revision = "0002_campaigns"
 down_revision = "0001_auth_foundation"
 branch_labels = None

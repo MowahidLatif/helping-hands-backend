@@ -3,7 +3,7 @@
 #     update_campaign,
 #     delete_campaign,
 # )
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, Response
 from flask_jwt_extended import jwt_required, get_jwt
 from app.utils.authz import require_org_role
 from app.models.campaign import (
@@ -24,6 +24,7 @@ from app.services.giveaway_service import draw_winner_for_campaign
 from uuid import UUID
 from app.models.org_user import get_user_role_in_org
 from flask_jwt_extended import get_jwt_identity
+from app.models.donation import select_donations_by_campaign
 
 campaigns = Blueprint("campaigns", __name__)
 
@@ -207,3 +208,81 @@ def recent_donations(campaign_id):
         return jsonify({"error": "invalid campaign_id"}), 400
     limit = int(request.args.get("limit", 10))
     return jsonify(recent_succeeded_for_campaign(campaign_id, limit)), 200
+
+
+@campaigns.get("/<campaign_id>/donations/export.csv")
+@jwt_required()
+def export_donations_csv(campaign_id):
+    camp = get_campaign(campaign_id)
+    if not camp:
+        return jsonify({"error": "not found"}), 404
+
+    role = get_user_role_in_org(get_jwt_identity(), camp["org_id"])
+    if role not in ("owner", "admin"):
+        return jsonify({"error": "forbidden"}), 403
+
+    # Build CSV
+    rows = select_donations_by_campaign(campaign_id)
+    # If your select returns full rows, map them—otherwise write a tighter query that returns only needed fields.
+    import csv
+    import io
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(
+        [
+            "donation_id",
+            "amount_cents",
+            "currency",
+            "donor_email",
+            "status",
+            "created_at",
+        ]
+    )
+    for row in rows:
+        # adapt to your tuple/dict shape
+        # Example if using dicts:
+        # w.writerow([r["id"], r["amount_cents"], r["currency"], r["donor_email"], r["status"], r["created_at"]])
+        w.writerow(
+            [
+                row[0],
+                row[4] * 100 if row[4] else None,
+                "cad",
+                row[3],
+                "succeeded",
+                row[-1],
+            ]
+        )  # adjust to your schema!
+    out = buf.getvalue()
+    return Response(
+        out,
+        mimetype="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="campaign_{campaign_id}_donations.csv"'
+        },
+    )
+
+
+@campaigns.get("/<campaign_id>/webhooks/stripe-events")
+@jwt_required()
+def list_stripe_events(campaign_id):
+    camp = get_campaign(campaign_id)
+    if not camp:
+        return jsonify({"error": "not found"}), 404
+    role = get_user_role_in_org(get_jwt_identity(), camp["org_id"])
+    if role not in ("owner", "admin"):
+        return jsonify({"error": "forbidden"}), 403
+
+    from app.utils.db import get_db_connection
+
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT event_id, type, created_at FROM stripe_events ORDER BY created_at DESC LIMIT 50"
+        )
+        rows = cur.fetchall()
+        return (
+            jsonify(
+                [{"event_id": r[0], "type": r[1], "created_at": r[2]} for r in rows]
+            ),
+            200,
+        )

@@ -12,6 +12,7 @@ from app.models.campaign import recompute_total_raised
 from app.utils.cache import r
 from app.realtime import socketio
 from app.models.stripe_event import mark_event_processed
+from app.services.email_service import ensure_receipt_for_donation
 
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "").strip()
 DEV_SKIP = os.getenv("DEV_STRIPE_NO_VERIFY") == "1"
@@ -319,6 +320,13 @@ def process_stripe_event(
             if ev_type == "payment_intent.succeeded"
             else "canceled" if ev_type == "payment_intent.canceled" else "failed"
         )
+        # After we’ve resolved `d` to the donation row:
+        if new_status == "succeeded":
+            try:
+                ensure_receipt_for_donation(d["id"] if d else donation_id)
+            except Exception as e:
+                # never fail the webhook on email issues
+                print("[email receipt error]", str(e))
 
         # Prefer updating by PI; fall back to donation_id
         d = get_donation_by_pi(pi_id) if pi_id else None
