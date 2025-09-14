@@ -244,3 +244,42 @@ def list_succeeded_for_campaign(
                 }
                 for r in rows
             ]
+
+
+def recent_succeeded_for_campaign(campaign_id: str, limit: int = 10) -> list[dict]:
+    sql = """
+      SELECT id, donor_email, amount_cents, currency, created_at
+      FROM donations
+      WHERE campaign_id = %s AND status = 'succeeded'
+      ORDER BY created_at DESC
+      LIMIT %s
+    """
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (campaign_id, limit))
+        rows = cur.fetchall()
+        out = []
+        for r in rows:
+            did, email, cents, cur_code, ts = r
+            masked = None
+            if email:
+                local, _, dom = email.partition("@")
+                masked = (
+                    (
+                        local[:1] + "***" + local[-1]
+                        if len(local) > 2
+                        else (local[:1] + "***")
+                    )
+                    + "@"
+                    + dom
+                )
+            out.append(
+                {
+                    "id": did,
+                    "donor": masked,
+                    "amount_cents": int(cents),
+                    "amount": round(int(cents) / 100.0, 2),
+                    "currency": cur_code or "usd",
+                    "created_at": ts.isoformat() if ts else None,
+                }
+            )
+        return out

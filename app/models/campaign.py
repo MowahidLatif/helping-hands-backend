@@ -321,3 +321,24 @@ def insert_giveaway_log(
             "created_at",
         ]
         return dict(zip(cols, row))
+
+
+def list_giveaway_logs(campaign_id: str, limit: int = 20) -> list[dict]:
+    sql = """
+      SELECT campaign_id, winner_donation_id, mode, population_count, created_at
+      FROM giveaway_logs
+      WHERE campaign_id = %s
+      ORDER BY created_at DESC
+      LIMIT %s
+    """
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (campaign_id, limit))
+        rows = cur.fetchall()
+        cols = [
+            "campaign_id",
+            "winner_donation_id",
+            "mode",
+            "population_count",
+            "created_at",
+        ]
+        return [dict(zip(cols, r)) for r in rows]

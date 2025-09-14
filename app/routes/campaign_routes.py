@@ -13,11 +13,12 @@ from app.models.campaign import (
     update_campaign,
     delete_campaign,
     get_goal_and_total,
+    list_giveaway_logs,
 )
 from app.utils.slug import slugify
 import json
 from app.utils.cache import r
-from app.models.donation import count_and_last_succeeded
+from app.models.donation import count_and_last_succeeded, recent_succeeded_for_campaign
 from app.models.media import list_media_for_campaign
 from app.services.giveaway_service import draw_winner_for_campaign
 from uuid import UUID
@@ -185,3 +186,24 @@ def draw_winner_route(campaign_id):
         notes=notes,
     )
     return jsonify(payload), status
+
+
+@campaigns.get("/<campaign_id>/giveaway-logs")
+@jwt_required()
+def get_giveaway_logs(campaign_id):
+    camp = get_campaign(campaign_id)
+    if not camp:
+        return jsonify({"error": "not found"}), 404
+    role = get_user_role_in_org(get_jwt_identity(), camp["org_id"])
+    if role not in ("admin", "owner"):
+        return jsonify({"error": "forbidden"}), 403
+    limit = int(request.args.get("limit", 20))
+    return jsonify(list_giveaway_logs(campaign_id, limit=limit)), 200
+
+
+@campaigns.get("/<campaign_id>/donations/recent")
+def recent_donations(campaign_id):
+    if not _is_uuid(campaign_id):
+        return jsonify({"error": "invalid campaign_id"}), 400
+    limit = int(request.args.get("limit", 10))
+    return jsonify(recent_succeeded_for_campaign(campaign_id, limit)), 200

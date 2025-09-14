@@ -1,15 +1,8 @@
 from __future__ import annotations
 from typing import Dict, Any, Tuple, List, Optional
-
-# import secrets
 import hashlib
 from datetime import datetime
 from secrets import choice
-
-# from app.models.campaign import get_campaign_by_id, insert_giveaway_log, get_campaign
-# from app.models.donation import list_succeeded_for_campaign
-# from app.models.org_user import get_user_role_in_org
-
 from app.models.campaign import get_campaign_by_id, insert_giveaway_log
 from app.models.donation import list_succeeded_for_campaign, get_donation
 from app.models.org_user import get_user_role_in_org

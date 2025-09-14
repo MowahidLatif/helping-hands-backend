@@ -43,7 +43,7 @@ if __name__ == "__main__":
 # docker compose --env-file .env.docker up -d
 
 # Start your API + Socket.IO together (single process)
-#   poetry run python run.py
+# PORT=5050 poetry run python run.py OR poetry run python run.py
 
 # Stop the Python process with Ctrl+C in that terminal
 # Then bring down containers:
