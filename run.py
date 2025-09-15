@@ -46,3 +46,6 @@ if __name__ == "__main__":
 
 # python -m http.server 8080
 # http://127.0.0.1:8080/realtime_test.html
+
+# Alembic run case to generate new file.
+# poetry run alembic revision -m "thing goes here"

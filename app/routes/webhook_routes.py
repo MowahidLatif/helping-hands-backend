@@ -13,6 +13,5 @@ def stripe_webhook():
         )
         return jsonify(resp), status
     except Exception as e:
-        # Never leak stack traces to Stripe; just log in server console.
         print(f"[webhook error] {e}")
         return jsonify({"error": "bad payload"}), 400

@@ -1,8 +1,4 @@
-# from app.services.campaign_service import (
-#     create_campaign,
-#     update_campaign,
-#     delete_campaign,
-# )
+from app.utils.db import get_db_connection
 from flask import Blueprint, request, jsonify, Response
 from flask_jwt_extended import jwt_required, get_jwt
 from app.utils.authz import require_org_role
@@ -18,17 +14,21 @@ from app.models.campaign import (
 from app.utils.slug import slugify
 import json
 from app.utils.cache import r
-from app.models.donation import count_and_last_succeeded, recent_succeeded_for_campaign
+from app.models.donation import (
+    count_and_last_succeeded,
+    recent_succeeded_for_campaign,
+    select_donations_by_campaign,
+)
 from app.models.media import list_media_for_campaign
 from app.services.giveaway_service import draw_winner_for_campaign
 from uuid import UUID
 from app.models.org_user import get_user_role_in_org
 from flask_jwt_extended import get_jwt_identity
-from app.models.donation import select_donations_by_campaign
 from app.models.email_receipt import (
     list_receipts_for_campaign,
     get_receipt,
     resend_receipt,
+    render_receipt_content,
 )
 
 campaigns = Blueprint("campaigns", __name__)
@@ -278,8 +278,6 @@ def list_stripe_events(campaign_id):
     if role not in ("owner", "admin"):
         return jsonify({"error": "forbidden"}), 403
 
-    from app.utils.db import get_db_connection
-
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT event_id, type, created_at FROM stripe_events ORDER BY created_at DESC LIMIT 50"
@@ -340,3 +338,43 @@ def campaign_receipt_resend(campaign_id, receipt_id):
     if not newrow:
         return jsonify({"error": "not found"}), 404
     return jsonify(newrow), 201
+
+
+@campaigns.get("/<campaign_id>/receipts/preview-template")
+@jwt_required()
+def preview_receipt_template(campaign_id: str):
+    """
+    Render the org's current email templates (subject/text/html) for a fake donation
+    without creating any DB rows.
+    Query params: amount_cents, currency, donor_email
+    """
+    amount_cents = int(request.args.get("amount_cents", "2500") or 2500)
+    currency = (request.args.get("currency") or "cad").lower()
+    donor_email = request.args.get("donor_email") or "demo@example.com"
+
+    camp = get_campaign(campaign_id)
+    if not camp:
+        return jsonify({"error": "campaign not found"}), 404
+
+    # Minimal donation-like dict for rendering
+    d = {
+        "id": None,
+        "org_id": camp["org_id"],
+        "campaign_id": campaign_id,
+        "campaign_title": camp["title"],
+        "amount_cents": amount_cents,
+        "currency": currency,
+        "donor_email": donor_email,
+    }
+
+    content = render_receipt_content(camp["org_id"], d)
+    return (
+        jsonify(
+            {
+                "subject": content["subject"],
+                "body_text": content["body_text"],
+                "body_html": content["body_html"],
+            }
+        ),
+        200,
+    )

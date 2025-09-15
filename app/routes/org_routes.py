@@ -13,8 +13,10 @@ from app.models.org_user import (
     list_org_members,
     set_user_role,
     remove_user_from_org,
+    get_user_role_in_org,
 )
 from app.models.user import get_user_by_email
+from app.models.org_email_settings import get_email_settings, upsert_email_settings
 
 orgs = Blueprint("orgs", __name__)
 
@@ -110,3 +112,25 @@ def change_role(org_id, user_id):
 def remove_member(org_id, user_id):
     ok = remove_user_from_org(org_id, user_id)
     return ("", 204) if ok else (jsonify({"error": "not found"}), 404)
+
+
+@orgs.get("/api/orgs/<org_id>/email-settings")
+@jwt_required()
+def get_org_email_settings(org_id):
+    user_id = get_jwt_identity()
+    role = get_user_role_in_org(user_id, org_id)
+    if role not in ("owner", "admin"):
+        return jsonify({"error": "forbidden"}), 403
+    return jsonify(get_email_settings(org_id) or {"org_id": org_id})
+
+
+@orgs.patch("/api/orgs/<org_id>/email-settings")
+@jwt_required()
+def patch_org_email_settings(org_id):
+    user_id = get_jwt_identity()
+    role = get_user_role_in_org(user_id, org_id)
+    if role not in ("owner", "admin"):
+        return jsonify({"error": "forbidden"}), 403
+    payload = request.get_json(force=True, silent=True) or {}
+    updated = upsert_email_settings(org_id, **payload)
+    return jsonify(updated)

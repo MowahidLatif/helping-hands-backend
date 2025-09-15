@@ -1,6 +1,26 @@
 from typing import Any, List, Dict, Optional
 from app.utils.db import get_db_connection
 
+from flask import render_template_string
+from app.models.org_email_settings import get_email_settings
+from app.models.campaign import get_campaign
+
+DEFAULT_SUBJECT = "Thanks for your donation to {{ campaign.title }}!"
+DEFAULT_TEXT = """Hi,
+
+Thank you for your donation of ${{ amount }} to {{ campaign.title }}.
+Campaign: {{ campaign.title }} (#{{ campaign.id }})
+Currency: {{ donation.currency|upper }}
+
+— The Team
+"""
+DEFAULT_HTML = """<p>Hi,</p>
+<p>Thank you for your donation of ${{ amount }} to <strong>{{ campaign.title }}</strong>.</p>
+<p>Campaign: {{ campaign.title }} (#{{ campaign.id }})<br/>
+Currency: {{ donation.currency|upper }}</p>
+<p>— The Team</p>
+"""
+
 
 def list_receipts_for_campaign(
     campaign_id: str, limit: int = 50
@@ -85,5 +105,59 @@ def resend_receipt(receipt_id: str) -> Optional[Dict[str, Any]]:
         conn.commit()
         if not row:
             return None
+        cols = ["id", "donation_id", "to_email", "subject", "sent_at", "created_at"]
+        return dict(zip(cols, row))
+
+
+def _format_amount(cents: int) -> str:
+    if cents is None:
+        return "0.00"
+    return f"{cents/100:.2f}"
+
+
+def render_receipt_content(org_id: str, donation_row: Dict[str, Any]) -> Dict[str, str]:
+    camp = get_campaign(donation_row["campaign_id"]) or {}
+    org_cfg = get_email_settings(org_id) or {}
+    subject_tpl = org_cfg.get("receipt_subject") or DEFAULT_SUBJECT
+    text_tpl = org_cfg.get("receipt_text") or DEFAULT_TEXT
+    html_tpl = org_cfg.get("receipt_html") or DEFAULT_HTML
+
+    ctx = {
+        "org": {"id": org_id},
+        "campaign": {"id": camp.get("id"), "title": camp.get("title", "Our campaign")},
+        "donation": {
+            "id": donation_row["id"],
+            "currency": donation_row.get("currency", "usd"),
+        },
+        "amount": _format_amount(int(donation_row.get("amount_cents") or 0)),
+        "donor_email": donation_row.get("donor_email"),
+    }
+    # Jinja2 via Flask:
+    subject = render_template_string(subject_tpl, **ctx)
+    body_text = render_template_string(text_tpl, **ctx)
+    body_html = render_template_string(html_tpl, **ctx)
+    return {"subject": subject, "body_text": body_text, "body_html": body_html}
+
+
+def insert_receipt_row(
+    *,
+    donation_id: str,
+    to_email: str,
+    subject: str,
+    body_text: str,
+    body_html: str,
+    sent_at: Optional[str] = None,
+) -> Dict[str, Any]:
+    sql = """
+    INSERT INTO email_receipts (donation_id, to_email, subject, body_text, body_html, sent_at)
+    VALUES (%s, %s, %s, %s, %s, COALESCE(%s, now()))
+    RETURNING id, donation_id, to_email, subject, sent_at, created_at
+    """
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            sql, (donation_id, to_email, subject, body_text, body_html, sent_at)
+        )
+        row = cur.fetchone()
+        conn.commit()
         cols = ["id", "donation_id", "to_email", "subject", "sent_at", "created_at"]
         return dict(zip(cols, row))
