@@ -6,7 +6,7 @@ app = create_app()
 init_socketio(app)
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 5050))  # default to 5050
+    port = int(os.getenv("PORT", 5050))
     socketio.run(
         app,
         host="127.0.0.1",
@@ -15,11 +15,6 @@ if __name__ == "__main__":
         use_reloader=False,
         log_output=True,
     )
-
-# app = create_app()
-# if __name__ == "__main__":
-#     # eventlet server with websockets
-#     socketio.run(app, host="127.0.0.1", port=5050, debug=True)
 
 # --- SCHEDULE ---
 

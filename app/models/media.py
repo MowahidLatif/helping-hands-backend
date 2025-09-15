@@ -80,9 +80,6 @@ def list_media_for_campaign(campaign_id: str) -> list[dict[str, Any]]:
         return [dict(zip(cols, r)) for r in rows]
 
 
-# from app.utils.db import get_db_connection
-
-
 def insert_media(campaign_id, data):
     conn = get_db_connection()
     cur = conn.cursor()

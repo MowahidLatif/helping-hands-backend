@@ -256,12 +256,10 @@ def get_goal_and_total(campaign_id: str) -> tuple[float, float] | None:
         row = cur.fetchone()
         if not row:
             return None
-        # both are NUMERIC in DB; cast to float for JSON
         return (float(row[0]), float(row[1]))
 
 
 def get_campaign_by_id(campaign_id: str) -> dict[str, Any] | None:
-    # alias so giveaway_service import works
     return get_campaign(campaign_id)
 
 

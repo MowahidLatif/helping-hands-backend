@@ -164,28 +164,6 @@ def count_and_last_succeeded(campaign_id: str) -> tuple[int, str | None]:
         return (row[0], row[1])
 
 
-# def list_succeeded_for_campaign(
-#     campaign_id: str, min_amount_cents: int = 0
-# ) -> list[dict[str, Any]]:
-#     """
-#     Return all succeeded donations for a campaign, optionally filtered by a minimum amount.
-#     Ordered by created_at ascending (stable order for draws).
-#     """
-#     sql = """
-#       SELECT id, donor_email, amount_cents, currency, created_at
-#       FROM donations
-#       WHERE campaign_id = %s
-#         AND status = 'succeeded'
-#         AND amount_cents >= %s
-#       ORDER BY created_at ASC
-#     """
-#     with get_db_connection() as conn, conn.cursor() as cur:
-#         cur.execute(sql, (campaign_id, min_amount_cents))
-#         rows = cur.fetchall()
-#         cols = ["id", "donor_email", "amount_cents", "currency", "created_at"]
-#         return [dict(zip(cols, r)) for r in rows]
-
-
 def list_succeeded_for_campaign(
     campaign_id: str,
     *,

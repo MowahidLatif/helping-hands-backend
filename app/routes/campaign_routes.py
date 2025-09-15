@@ -25,6 +25,11 @@ from uuid import UUID
 from app.models.org_user import get_user_role_in_org
 from flask_jwt_extended import get_jwt_identity
 from app.models.donation import select_donations_by_campaign
+from app.models.email_receipt import (
+    list_receipts_for_campaign,
+    get_receipt,
+    resend_receipt,
+)
 
 campaigns = Blueprint("campaigns", __name__)
 
@@ -286,3 +291,52 @@ def list_stripe_events(campaign_id):
             ),
             200,
         )
+
+
+@campaigns.get("/<campaign_id>/receipts")
+@jwt_required()
+def campaign_receipts(campaign_id):
+    camp = get_campaign(campaign_id)
+    if not camp:
+        return jsonify({"error": "not found"}), 404
+    role = get_user_role_in_org(get_jwt_identity(), camp["org_id"])
+    if role not in ("admin", "owner"):
+        return jsonify({"error": "forbidden"}), 403
+
+    try:
+        limit = int(request.args.get("limit", 50))
+    except Exception:
+        limit = 50
+
+    items = list_receipts_for_campaign(campaign_id, limit=limit)
+    return jsonify(items), 200
+
+
+@campaigns.get("/<campaign_id>/receipts/<receipt_id>/preview")
+@jwt_required()
+def campaign_receipt_preview(campaign_id, receipt_id):
+    rec = get_receipt(receipt_id)
+    if not rec or rec["campaign_id"] != campaign_id:
+        return jsonify({"error": "not found"}), 404
+    role = get_user_role_in_org(get_jwt_identity(), rec["org_id"])
+    if role not in ("admin", "owner"):
+        return jsonify({"error": "forbidden"}), 403
+
+    html = rec.get("body_html") or "<p>No content</p>"
+    return html, 200, {"Content-Type": "text/html; charset=utf-8"}
+
+
+@campaigns.post("/<campaign_id>/receipts/<receipt_id>/resend")
+@jwt_required()
+def campaign_receipt_resend(campaign_id, receipt_id):
+    rec = get_receipt(receipt_id)
+    if not rec or rec["campaign_id"] != campaign_id:
+        return jsonify({"error": "not found"}), 404
+    role = get_user_role_in_org(get_jwt_identity(), rec["org_id"])
+    if role not in ("admin", "owner"):
+        return jsonify({"error": "forbidden"}), 403
+
+    newrow = resend_receipt(receipt_id)
+    if not newrow:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(newrow), 201
