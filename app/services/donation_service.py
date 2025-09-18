@@ -1,5 +1,6 @@
 import os
 import math
+import stripe
 import uuid
 from typing import Dict, Any
 from app.models.campaign import get_campaign
@@ -32,7 +33,6 @@ def start_checkout(
         donor_email=(donor_email or None),
     )
 
-    # Dev fallback (no Stripe key provided)
     if not STRIPE_SECRET:
         fake_pi = f"pi_{uuid.uuid4().hex}"
         fake_cs = f"{fake_pi}_secret_{uuid.uuid4().hex}"
@@ -43,11 +43,7 @@ def start_checkout(
             "dev_mode": True,
         }
 
-    # Real Stripe
-    import stripe
-
     stripe.api_key = STRIPE_SECRET
-
     pi = stripe.PaymentIntent.create(
         amount=amount_cents,
         currency=CURRENCY,
@@ -62,10 +58,3 @@ def start_checkout(
 
     set_payment_intent(donation["id"], pi.id)
     return {"donation_id": donation["id"], "clientSecret": pi.client_secret}
-
-
-# def create_donation(data):
-#     return insert_donation(data)
-
-# def get_donations_for_campaign(campaign_id):
-#     return select_donations_by_campaign(campaign_id)

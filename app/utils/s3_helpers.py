@@ -48,15 +48,12 @@ def presign_put(key: str, content_type: str, expires: int = 3600) -> dict:
         ExpiresIn=expires,
         HttpMethod="PUT",
     )
-    # headers MUST match Params when you upload
     return {"upload_url": url, "required_headers": {"Content-Type": content_type}}
 
 
 def public_url(key: str) -> str:
-    # Dev convenience for path-style MinIO
     if USE_PATH:
         return f"{S3_ENDPOINT.rstrip('/')}/{S3_BUCKET}/{key}"
-    # virtual-host style
     from urllib.parse import urlparse
 
     ep = urlparse(S3_ENDPOINT)

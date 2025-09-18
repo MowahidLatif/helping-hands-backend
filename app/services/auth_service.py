@@ -1,4 +1,3 @@
-# import bcrypt
 from app.models.user import get_user_by_email, create_user
 import re
 import bcrypt
@@ -8,34 +7,6 @@ from app.models.org import create_organization
 from app.models.org_user import add_user_to_org, get_primary_org_role
 
 EMAIL_RE = re.compile(r"^[^@]+@[^@]+\.[^@]+$")
-
-# def login_user(data):
-#     email = data.get("email")
-#     password = data.get("password")
-
-#     user = get_user_by_email(email)
-#     if not user:
-#         return {"error": "User not found"}
-
-#     stored_hash = user[2]
-#     if not bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8")):
-#         return {"error": "Invalid credentials"}
-
-#     token = generate_token(user[0])
-#     return {"token": token, "user_id": user[0]}
-
-# def signup_user(data):
-#     password = data.get("password")
-#     hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-
-#     user_data = {
-#         "username": data.get("username"),
-#         "email": data.get("email"),
-#         "password_hash": hashed,
-#         "custom_domain": data.get("custom_domain"),
-#     }
-
-#     return insert_user(user_data)
 
 
 def _normalize_email(email: str) -> str:
@@ -79,8 +50,6 @@ def signup_user(data: dict) -> dict:
         return {"error": "Email already registered"}
 
     user = create_user(email=email, password_hash=_hash_password(password), name=name)
-
-    # Create default org + owner membership
     if not org_name:
         org_name = email.split("@", 1)[0] + "'s Org"
     org = create_organization(org_name)

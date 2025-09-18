@@ -30,6 +30,8 @@ from app.models.email_receipt import (
     resend_receipt,
     render_receipt_content,
 )
+import csv
+import io
 
 campaigns = Blueprint("campaigns", __name__)
 
@@ -42,7 +44,6 @@ def _is_uuid(v: str) -> bool:
         return False
 
 
-# GET /api/campaigns?org_id=...
 @campaigns.get("/")
 @require_org_role()
 def list_for_org():
@@ -52,7 +53,6 @@ def list_for_org():
     return jsonify(items), 200
 
 
-# POST /api/campaigns  { title, goal?, status?, custom_domain?, org_id? }
 @campaigns.post("/")
 @require_org_role("admin", "owner")
 def create():
@@ -77,7 +77,6 @@ def create():
         return jsonify({"error": str(e)}), 400
 
 
-# PATCH /api/campaigns/<id>  { title?, goal?, status?, slug?, custom_domain? }
 @campaigns.patch("/<campaign_id>")
 @jwt_required()
 def patch(campaign_id):
@@ -111,16 +110,12 @@ def patch(campaign_id):
         return jsonify({"error": str(e)}), 400
 
 
-# DELETE /api/campaigns/<id>
 @campaigns.delete("/<campaign_id>")
 @jwt_required()
 def delete(campaign_id):
     camp = get_campaign(campaign_id)
     if not camp:
         return jsonify({"error": "not found"}), 404
-
-    # from app.models.org_user import get_user_role_in_org
-    # from flask_jwt_extended import get_jwt_identity
 
     role = get_user_role_in_org(get_jwt_identity(), camp["org_id"])
     if role not in ("admin", "owner"):
@@ -222,11 +217,7 @@ def export_donations_csv(campaign_id):
     if role not in ("owner", "admin"):
         return jsonify({"error": "forbidden"}), 403
 
-    # Build CSV
     rows = select_donations_by_campaign(campaign_id)
-    # If your select returns full rows, map them—otherwise write a tighter query that returns only needed fields.
-    import csv
-    import io
 
     buf = io.StringIO()
     w = csv.writer(buf)
@@ -241,9 +232,6 @@ def export_donations_csv(campaign_id):
         ]
     )
     for row in rows:
-        # adapt to your tuple/dict shape
-        # Example if using dicts:
-        # w.writerow([r["id"], r["amount_cents"], r["currency"], r["donor_email"], r["status"], r["created_at"]])
         w.writerow(
             [
                 row[0],
@@ -253,7 +241,7 @@ def export_donations_csv(campaign_id):
                 "succeeded",
                 row[-1],
             ]
-        )  # adjust to your schema!
+        )
     out = buf.getvalue()
     return Response(
         out,
@@ -352,7 +340,6 @@ def preview_receipt_template(campaign_id: str):
     if not camp:
         return jsonify({"error": "campaign not found"}), 404
 
-    # Minimal donation-like dict for rendering
     d = {
         "id": None,
         "org_id": camp["org_id"],

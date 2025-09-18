@@ -23,7 +23,6 @@ from app.utils.slug import slugify_with_fallback
 orgs = Blueprint("orgs", __name__)
 
 
-# Create an org (caller becomes owner)
 @orgs.post("/api/orgs")
 @jwt_required()
 def create_org():
@@ -31,17 +30,13 @@ def create_org():
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
     sub = (data.get("subdomain") or "").strip() or None
-    # name = (request.json or {}).get("name")
     if not name:
         return jsonify({"error": "name required"}), 400
-    # org = create_organization(name)
     org = create_organization(name, sub)
     add_user_to_org(org["id"], user_id, role="owner")
-    # return jsonify(org), 201
     return org, 201
 
 
-# List orgs current user belongs to
 @orgs.get("/api/orgs")
 @jwt_required()
 def my_orgs():
@@ -49,9 +44,8 @@ def my_orgs():
     return jsonify(list_user_organizations(user_id)), 200
 
 
-# Get org by id (must be a member)
 @orgs.get("/api/orgs/<org_id>")
-@require_org_role()  # any member
+@require_org_role()
 def get_org(org_id):
     org = get_organization(org_id)
     if not org:
@@ -59,7 +53,6 @@ def get_org(org_id):
     return jsonify(org), 200
 
 
-# Update org name (admin/owner)
 @orgs.patch("/api/orgs/<org_id>")
 @require_org_role("admin", "owner")
 def rename_org(org_id):
@@ -72,7 +65,6 @@ def rename_org(org_id):
     return jsonify(org), 200
 
 
-# Delete org (owner only)
 @orgs.delete("/api/orgs/<org_id>")
 @require_org_role("owner")
 def delete_org(org_id):
@@ -80,14 +72,12 @@ def delete_org(org_id):
     return ("", 204) if ok else (jsonify({"error": "not found"}), 404)
 
 
-# Members: list
 @orgs.get("/api/orgs/<org_id>/members")
 @require_org_role("admin", "owner")
 def members(org_id):
     return jsonify(list_org_members(org_id)), 200
 
 
-# Members: add by email with role (admin/owner)
 @orgs.post("/api/orgs/<org_id>/members")
 @require_org_role("admin", "owner")
 def add_member(org_id):
@@ -100,7 +90,6 @@ def add_member(org_id):
     return jsonify({"added": user["id"], "role": role}), 201
 
 
-# Members: change role (admin/owner)
 @orgs.patch("/api/orgs/<org_id>/members/<user_id>")
 @require_org_role("admin", "owner")
 def change_role(org_id, user_id):
@@ -113,7 +102,6 @@ def change_role(org_id, user_id):
     )
 
 
-# Members: remove (admin/owner)
 @orgs.delete("/api/orgs/<org_id>/members/<user_id>")
 @require_org_role("admin", "owner")
 def remove_member(org_id, user_id):
@@ -141,37 +129,6 @@ def patch_org_email_settings(org_id):
     payload = request.get_json(force=True, silent=True) or {}
     updated = upsert_email_settings(org_id, **payload)
     return jsonify(updated)
-
-
-# @orgs.patch("/api/orgs/<org_id>/subdomain")
-# @jwt_required()
-# def set_org_subdomain(org_id):
-#     user_id = get_jwt_identity()
-#     role = get_user_role_in_org(user_id, org_id)
-#     if role not in ("owner", "admin"):
-#         return jsonify({"error": "forbidden"}), 403
-
-#     sub = (request.json or {}).get("subdomain", "")
-#     sub = slugify_with_fallback(sub, fallback=f"org-{org_id}")
-
-#     with get_db_connection() as conn, conn.cursor() as cur:
-#         # uniqueness check
-#         cur.execute(
-#             "SELECT id FROM orgs WHERE subdomain=%s AND id<>%s",
-#             (sub, org_id),
-#         )
-#         if cur.fetchone():
-#             return jsonify({"error": "subdomain already in use"}), 409
-
-#         cur.execute(
-#             "UPDATE orgs SET subdomain=%s WHERE id=%s RETURNING id, name, subdomain",
-#             (sub, org_id),
-#         )
-#         row = cur.fetchone()
-#         if not row:
-#             return jsonify({"error": "not found"}), 404
-
-#     return jsonify({"id": row[0], "name": row[1], "subdomain": row[2]}), 200
 
 
 @orgs.patch("/api/orgs/<org_id>/subdomain")

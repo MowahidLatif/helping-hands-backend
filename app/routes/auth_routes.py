@@ -12,7 +12,6 @@ def register():
     return jsonify(resp), (201 if "access_token" in resp else 400)
 
 
-# Replace or modify to fit the formatting of other code (03/09/2025)
 @auth_bp.post("/login")
 def login():
     data = request.get_json(force=True, silent=True) or {}
@@ -26,13 +25,6 @@ def refresh():
     user_id = get_jwt_identity()
     new_access = create_access_token(identity=user_id)
     return jsonify({"access_token": new_access}), 200
-
-
-# @auth_bp.route("/login", methods=["POST"])
-# def login():
-#     data = request.json
-#     response = login_user(data)
-#     return jsonify(response), (200 if "token" in response else 401)
 
 
 @auth_bp.route("/signup", methods=["POST"])

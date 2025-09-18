@@ -70,7 +70,6 @@ def _serialize_winner(row: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _serialize_donation(row: Dict[str, Any]) -> Dict[str, Any]:
-    # Ensure all fields are JSON-safe
     return {
         "id": row["id"],
         "campaign_id": row["campaign_id"],
@@ -110,14 +109,10 @@ def draw_winner_for_campaign(
 
     donation_ids = [p["donation_id"] for p in population]
     pop_hash = _population_hash(donation_ids, mode, min_amount_cents)
-
     winner = choice(population)
     winner_id = winner["donation_id"]
-
-    # Load the full donation row for clean JSON
     full = get_donation(winner_id)
     if not full:
-        # extremely unlikely, fallback to minimal info
         full = {
             "id": winner_id,
             "campaign_id": campaign_id,

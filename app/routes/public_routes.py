@@ -1,7 +1,6 @@
 from flask import Blueprint, jsonify
 from app.utils.db import get_db_connection
 
-# This blueprint is mounted on a dynamic subdomain
 public = Blueprint("public", __name__, subdomain="<org_subdomain>")
 
 
@@ -20,10 +19,8 @@ def org_home(org_subdomain):
     with get_db_connection() as conn, conn.cursor() as cur:
         org_id = _get_org_id_by_subdomain(cur, org_subdomain)
         if not org_id:
-            # Keep JSONy behavior
             return jsonify({"error": "org not found"}), 404
 
-        # If you track created_at, use it; else sort by id desc
         cur.execute(
             """
             SELECT id, title, slug

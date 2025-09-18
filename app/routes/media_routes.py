@@ -1,8 +1,3 @@
-# from flask import Blueprint, request
-# from app.services.media_service import (
-#     add_media, get_media_by_campaign
-# )
-
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.models.campaign import get_campaign
@@ -12,7 +7,6 @@ from app.utils.s3_helpers import make_key, presign_put, public_url
 media_bp = Blueprint("media", __name__)
 
 
-# GET /api/media/signed-url?campaign_id=...&filename=...&content_type=...
 @media_bp.get("/api/media/signed-url")
 @jwt_required()
 def signed_url():
@@ -22,7 +16,6 @@ def signed_url():
     if not campaign_id:
         return jsonify({"error": "campaign_id required"}), 400
 
-    # role check: admin/owner on the campaign's org
     campaign = get_campaign(campaign_id)
     if not campaign:
         return jsonify({"error": "campaign not found"}), 404
@@ -35,12 +28,9 @@ def signed_url():
 
     key = make_key(campaign["org_id"], campaign_id, filename)
     signed = presign_put(key, content_type)
-    # include key so the client can POST metadata later
     return jsonify({"key": key, **signed}), 200
 
 
-# POST /api/media  (persist metadata after successful upload)
-# body: { campaign_id, key, type, content_type?, size_bytes?, description?, sort? }
 @media_bp.post("/api/media")
 @jwt_required()
 def persist():
@@ -72,7 +62,7 @@ def persist():
         size_bytes=(
             int(body["size_bytes"]) if body.get("size_bytes") is not None else None
         ),
-        url=public_url(key),  # dev convenience (bucket is public in dev)
+        url=public_url(key),
         description=body.get("description"),
         sort=body.get("sort"),
     )
