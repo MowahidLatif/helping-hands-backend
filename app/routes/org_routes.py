@@ -17,6 +17,8 @@ from app.models.org_user import (
 )
 from app.models.user import get_user_by_email
 from app.models.org_email_settings import get_email_settings, upsert_email_settings
+from app.utils.db import get_db_connection
+from app.utils.slug import slugify_with_fallback
 
 orgs = Blueprint("orgs", __name__)
 
@@ -26,12 +28,17 @@ orgs = Blueprint("orgs", __name__)
 @jwt_required()
 def create_org():
     user_id = get_jwt_identity()
-    name = (request.json or {}).get("name")
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    sub = (data.get("subdomain") or "").strip() or None
+    # name = (request.json or {}).get("name")
     if not name:
         return jsonify({"error": "name required"}), 400
-    org = create_organization(name)
+    # org = create_organization(name)
+    org = create_organization(name, sub)
     add_user_to_org(org["id"], user_id, role="owner")
-    return jsonify(org), 201
+    # return jsonify(org), 201
+    return org, 201
 
 
 # List orgs current user belongs to
@@ -134,3 +141,64 @@ def patch_org_email_settings(org_id):
     payload = request.get_json(force=True, silent=True) or {}
     updated = upsert_email_settings(org_id, **payload)
     return jsonify(updated)
+
+
+# @orgs.patch("/api/orgs/<org_id>/subdomain")
+# @jwt_required()
+# def set_org_subdomain(org_id):
+#     user_id = get_jwt_identity()
+#     role = get_user_role_in_org(user_id, org_id)
+#     if role not in ("owner", "admin"):
+#         return jsonify({"error": "forbidden"}), 403
+
+#     sub = (request.json or {}).get("subdomain", "")
+#     sub = slugify_with_fallback(sub, fallback=f"org-{org_id}")
+
+#     with get_db_connection() as conn, conn.cursor() as cur:
+#         # uniqueness check
+#         cur.execute(
+#             "SELECT id FROM orgs WHERE subdomain=%s AND id<>%s",
+#             (sub, org_id),
+#         )
+#         if cur.fetchone():
+#             return jsonify({"error": "subdomain already in use"}), 409
+
+#         cur.execute(
+#             "UPDATE orgs SET subdomain=%s WHERE id=%s RETURNING id, name, subdomain",
+#             (sub, org_id),
+#         )
+#         row = cur.fetchone()
+#         if not row:
+#             return jsonify({"error": "not found"}), 404
+
+#     return jsonify({"id": row[0], "name": row[1], "subdomain": row[2]}), 200
+
+
+@orgs.patch("/api/orgs/<org_id>/subdomain")
+@jwt_required()
+def set_org_subdomain(org_id):
+    user_id = get_jwt_identity()
+    role = get_user_role_in_org(user_id, org_id)
+    if role not in ("owner", "admin"):
+        return jsonify({"error": "forbidden"}), 403
+
+    body = request.get_json(silent=True) or {}
+    sub = slugify_with_fallback(body.get("subdomain"), f"org-{org_id}")
+
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT 1 FROM organizations WHERE subdomain=%s AND id<>%s",
+            (sub, org_id),
+        )
+        if cur.fetchone():
+            return jsonify({"error": "subdomain already in use"}), 409
+
+        cur.execute(
+            "UPDATE organizations SET subdomain=%s WHERE id=%s RETURNING id, name, subdomain",
+            (sub, org_id),
+        )
+        row = cur.fetchone()
+        if not row:
+            return jsonify({"error": "not found"}), 404
+
+    return jsonify({"id": row[0], "name": row[1], "subdomain": row[2]}), 200

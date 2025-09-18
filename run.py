@@ -1,3 +1,4 @@
+# run.py
 from app import create_app
 from app.realtime import socketio, init_socketio
 import os
@@ -48,4 +49,8 @@ if __name__ == "__main__":
 # http://127.0.0.1:8080/realtime_test.html
 
 # Alembic run case to generate new file.
-# poetry run alembic revision -m "thing goes here"
+# poetry run alembic revision -m "Add subdomain and slug"
+
+# Testing cases for day 1 pt 2
+# export SERVER_NAME=helpinghands.local:5050
+# PORT=5050 poetry run python run.py

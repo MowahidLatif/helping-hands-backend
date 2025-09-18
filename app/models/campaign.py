@@ -1,6 +1,6 @@
 from app.utils.db import get_db_connection
 from typing import Any
-from app.utils.slug import slugify
+from app.utils.slug import slugify, slugify_with_fallback
 
 
 def insert_campaign(data):
@@ -79,8 +79,19 @@ def _slug_exists(org_id: str, slug: str) -> bool:
         return cur.fetchone() is not None
 
 
+# Delete if all test pass.
+# def unique_slug_for_org(org_id: str, base: str) -> str:
+#     base_slug = slugify(base)
+#     candidate = base_slug
+#     i = 2
+#     while _slug_exists(org_id, candidate):
+#         candidate = f"{base_slug}-{i}"
+#         i += 1
+#     return candidate
+
+
 def unique_slug_for_org(org_id: str, base: str) -> str:
-    base_slug = slugify(base)
+    base_slug = slugify_with_fallback(base, fallback="campaign")
     candidate = base_slug
     i = 2
     while _slug_exists(org_id, candidate):

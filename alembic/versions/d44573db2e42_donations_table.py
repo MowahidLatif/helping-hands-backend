@@ -1,7 +1,7 @@
 from alembic import op
 
 revision = "0006_donations"
-down_revision = "0005_campaign_media"  # <- your last head
+down_revision = "0005_campaign_media"
 branch_labels = None
 depends_on = None
 

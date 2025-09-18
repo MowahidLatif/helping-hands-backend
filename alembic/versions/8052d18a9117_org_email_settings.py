@@ -1,4 +1,3 @@
-# alembic/versions/<rev>_org_email_settings.py
 from alembic import op
 
 # IDs

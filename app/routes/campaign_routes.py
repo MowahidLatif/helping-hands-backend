@@ -79,15 +79,11 @@ def create():
 
 # PATCH /api/campaigns/<id>  { title?, goal?, status?, slug?, custom_domain? }
 @campaigns.patch("/<campaign_id>")
-@jwt_required()  # we'll also assert membership against the campaign's org
+@jwt_required()
 def patch(campaign_id):
     camp = get_campaign(campaign_id)
     if not camp:
         return jsonify({"error": "not found"}), 404
-
-    # role check against the campaign's org
-    # from app.models.org_user import get_user_role_in_org
-    # from flask_jwt_extended import get_jwt_identity
 
     role = get_user_role_in_org(get_jwt_identity(), camp["org_id"])
     if role not in ("admin", "owner"):
@@ -378,3 +374,10 @@ def preview_receipt_template(campaign_id: str):
         ),
         200,
     )
+
+
+@campaigns.get("/<campaign_id>")
+@jwt_required()
+def get_one(campaign_id):
+    row = get_campaign(campaign_id)
+    return (jsonify(row), 200) if row else ({"error": "not found"}, 404)

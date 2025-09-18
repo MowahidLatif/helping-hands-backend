@@ -1,14 +1,30 @@
 from typing import Any
 from app.utils.db import get_db_connection
+from app.utils.slug import slugify as _slugify
+import secrets
+
+# def create_organization(name: str) -> dict[str, Any]:
+#     sql = "INSERT INTO organizations (name) VALUES (%s) RETURNING id, name"
+#     with get_db_connection() as conn, conn.cursor() as cur:
+#         cur.execute(sql, (name,))
+#         row = cur.fetchone()
+#         conn.commit()
+#         return {"id": row[0], "name": row[1]}
 
 
-def create_organization(name: str) -> dict[str, Any]:
-    sql = "INSERT INTO organizations (name) VALUES (%s) RETURNING id, name"
+def create_organization(name: str, subdomain: str | None = None):
+    sub = _slugify(subdomain or name) or f"org-{secrets.token_hex(3)}"
+
     with get_db_connection() as conn, conn.cursor() as cur:
-        cur.execute(sql, (name,))
+        cur.execute(
+            "INSERT INTO organizations (name, subdomain) VALUES (%s, %s) "
+            "RETURNING id, name, subdomain",
+            (name, sub),
+        )
         row = cur.fetchone()
         conn.commit()
-        return {"id": row[0], "name": row[1]}
+
+    return {"id": row[0], "name": row[1], "subdomain": row[2]}
 
 
 def get_organization(org_id: str) -> dict[str, Any] | None:
