@@ -1,6 +1,5 @@
 from typing import Any, List, Dict, Optional
 from app.utils.db import get_db_connection
-
 from flask import render_template_string
 from app.models.org_email_settings import get_email_settings
 from app.models.campaign import get_campaign
@@ -132,7 +131,7 @@ def render_receipt_content(org_id: str, donation_row: Dict[str, Any]) -> Dict[st
         "amount": _format_amount(int(donation_row.get("amount_cents") or 0)),
         "donor_email": donation_row.get("donor_email"),
     }
-    # Jinja2 via Flask:
+
     subject = render_template_string(subject_tpl, **ctx)
     body_text = render_template_string(text_tpl, **ctx)
     body_html = render_template_string(html_tpl, **ctx)

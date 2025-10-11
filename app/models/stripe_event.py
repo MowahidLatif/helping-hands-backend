@@ -25,26 +25,3 @@ def mark_event_processed(
         row = cur.fetchone()
         conn.commit()
         return row is not None
-
-
-# from typing import Any
-# from app.utils.db import get_db_connection
-# from psycopg2.extras import Json
-
-# def mark_event_processed(dedupe_key: str, event_type: str, raw_event: dict[str, Any]) -> bool:
-#     """
-#     Try to insert a record for this Stripe webhook.
-#     Returns True if this is the first time we see this key (processed now),
-#     False if it was already processed (conflict on dedupe_key).
-#     """
-#     sql = """
-#     INSERT INTO stripe_events (dedupe_key, event_type, raw_event)
-#     VALUES (%s, %s, %s)
-#     ON CONFLICT (dedupe_key) DO NOTHING
-#     RETURNING dedupe_key
-#     """
-#     with get_db_connection() as conn, conn.cursor() as cur:
-#         cur.execute(sql, (dedupe_key, event_type, Json(raw_event)))
-#         row = cur.fetchone()
-#         conn.commit()
-#         return row is not None

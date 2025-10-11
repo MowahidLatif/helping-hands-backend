@@ -23,31 +23,6 @@ def get_email_settings(org_id: str) -> Optional[Dict[str, Any]]:
         return dict(zip(COLS, row)) if row else None
 
 
-# def upsert_email_settings(org_id: str, **fields) -> Dict[str, Any]:
-#     allowed = {k: v for k, v in fields.items() if k in {
-#         "from_name","from_email","reply_to","bcc_to",
-#         "receipt_subject","receipt_text","receipt_html"
-#     }}
-#     if not allowed:
-#         return get_email_settings(org_id) or {"org_id": org_id}
-
-#     sets = ", ".join([f"{k}=%s" for k in allowed.keys()])
-#     vals = list(allowed.values())
-
-#     sql = f"""
-#     INSERT INTO org_email_settings (org_id, {', '.join(allowed.keys())})
-#     VALUES (%s, {', '.join(['%s']*len(vals))})
-#     ON CONFLICT (org_id)
-#     DO UPDATE SET {sets}, updated_at=now()
-#     RETURNING {', '.join(COLS)}
-#     """
-#     with get_db_connection() as conn, conn.cursor() as cur:
-#         cur.execute(sql, (org_id, *vals))
-#         row = cur.fetchone()
-#         conn.commit()
-#         return dict(zip(COLS, row))
-
-
 def upsert_email_settings(
     org_id: str,
     from_name: Optional[str] = None,
@@ -58,15 +33,6 @@ def upsert_email_settings(
     receipt_text: Optional[str] = None,
     receipt_html: Optional[str] = None,
 ) -> Dict[str, Any]:
-    # fields = [
-    #     "from_name",
-    #     "from_email",
-    #     "reply_to",
-    #     "bcc_to",
-    #     "receipt_subject",
-    #     "receipt_text",
-    #     "receipt_html",
-    # ]
     vals = [
         from_name,
         from_email,

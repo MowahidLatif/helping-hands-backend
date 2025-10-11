@@ -2,7 +2,6 @@ from app.utils.db import get_db_connection
 from typing import Optional, Dict, Any
 
 
-# Replace or modify to fit the formatting of other code (03/09/2025)
 def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
     sql = "SELECT id, email, password_hash, name FROM users WHERE email = %s"
     with get_db_connection() as conn, conn.cursor() as cur:
@@ -108,13 +107,3 @@ def get_user(user_id):
     cur.close()
     conn.close()
     return user
-
-
-# def get_user_by_email(email):
-#     conn = get_db_connection()
-#     cur = conn.cursor()
-#     cur.execute("SELECT id, username, email, custom_domain FROM users WHERE email = %s;", (email,))
-#     user = cur.fetchone()
-#     cur.close()
-#     conn.close()
-#     return user
