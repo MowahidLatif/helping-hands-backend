@@ -19,6 +19,7 @@ from app.models.user import get_user_by_email
 from app.models.org_email_settings import get_email_settings, upsert_email_settings
 from app.utils.db import get_db_connection
 from app.utils.slug import slugify_with_fallback
+from psycopg2.errors import UniqueViolation
 
 orgs = Blueprint("orgs", __name__)
 
@@ -32,7 +33,10 @@ def create_org():
     sub = (data.get("subdomain") or "").strip() or None
     if not name:
         return jsonify({"error": "name required"}), 400
-    org = create_organization(name, sub)
+    try:
+        org = create_organization(name, sub)
+    except UniqueViolation:
+        return jsonify({"error": "subdomain already taken"}), 409
     add_user_to_org(org["id"], user_id, role="owner")
     return org, 201
 

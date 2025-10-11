@@ -4,8 +4,7 @@ from flask import Flask, request
 from dotenv import load_dotenv
 from flask_jwt_extended import JWTManager
 from datetime import timedelta
-
-# from datetime_timedelta import timedelta
+from flask_cors import CORS
 
 from app.routes import (
     auth_bp,
@@ -36,7 +35,13 @@ def create_app():
     #     app = Flask(__name__)
 
     app = Flask(__name__, subdomain_matching=True)
-
+    CORS(
+        app,
+        resources={
+            r"/api/*": {"origins": ["http://localhost:3000", "http://127.0.0.1:3000"]}
+        },
+        supports_credentials=True,
+    )
     app.url_map.strict_slashes = False
     app.config["SERVER_NAME"] = server_name
     print(f"*** SERVER_NAME is {app.config['SERVER_NAME']!r}")
