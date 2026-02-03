@@ -13,7 +13,7 @@ from app.models.campaign import recompute_total_raised
 from app.utils.cache import r
 from app.realtime import socketio
 from app.models.stripe_event import mark_event_processed
-from app.services.email_service import ensure_receipt_for_donation
+from app.tasks import enqueue_receipt_email
 
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "").strip()
 DEV_SKIP = os.getenv("DEV_STRIPE_NO_VERIFY") == "1"
@@ -126,7 +126,7 @@ def process_stripe_event(
 
         if new_status == "succeeded":
             try:
-                ensure_receipt_for_donation((d or {}).get("id") or donation_id)
+                enqueue_receipt_email((d or {}).get("id") or donation_id)
             except Exception as e:
                 print("[email receipt error]", str(e))
 

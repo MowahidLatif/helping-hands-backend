@@ -1,6 +1,9 @@
+[tool.poetry]
+package-mode = false
+
 [project]
 name = "donations"
-version = "0.1.0"
+version = "1.0.0"
 description = "Donations platform (Flask + Postgres + AWS)"
 authors = [
     {name = "mowahid latif",email = "mowahidlatif@hotmail.com"}
@@ -22,7 +25,10 @@ dependencies = [
     "flask-socketio (>=5.5.1,<6.0.0)",
     "python-socketio (>=5.13.0,<6.0.0)",
     "eventlet (>=0.40.3,<0.41.0)",
-    "flask-cors (>=6.0.1,<7.0.0)"
+    "flask-cors (>=6.0.1,<7.0.0)",
+    "sendgrid (>=6.11.0,<7.0.0)",
+    "rq (>=1.16.0,<2.0.0)",
+    "prometheus-client (>=0.21.0,<1.0.0)",
 ]
 
 

@@ -16,6 +16,7 @@ from app.routes import (
     donations_bp,
     webhooks_bp,
     public,
+    admin_bp,
 )
 from app.realtime import init_socketio
 
@@ -54,6 +55,25 @@ def create_app():
     app.config["JWT_REFRESH_TOKEN_EXPIRES"] = timedelta(days=30)
     JWTManager(app)
 
+    # Rate limiting middleware (in-memory; see app.utils.rate_limit)
+    from app.utils.rate_limit import (
+        rate_limit_key,
+        is_rate_limited,
+        rate_limit_exceeded_response,
+    )
+
+    default_limit = int(os.getenv("RATE_LIMIT_PER_MINUTE", "200"))
+
+    @app.before_request
+    def _rate_limit():
+        if os.getenv("RATE_LIMIT_ENABLED", "1") != "1" or default_limit <= 0:
+            return
+        if request.path == "/webhooks/stripe":
+            return  # exempt Stripe webhooks
+        key = f"global:{rate_limit_key()}"
+        if is_rate_limited(key, default_limit):
+            return rate_limit_exceeded_response(default_limit)
+
     @app.before_request
     def _dbg_host():
         print(f"DBG host={request.host!r} path={request.path!r}")
@@ -71,6 +91,7 @@ def create_app():
     app.register_blueprint(donations_bp)
     app.register_blueprint(webhooks_bp)
     app.register_blueprint(public)
+    app.register_blueprint(admin_bp)
 
     print("\n=== URL MAP ===")
     for rule in app.url_map.iter_rules():

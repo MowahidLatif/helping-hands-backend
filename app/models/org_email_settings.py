@@ -10,17 +10,47 @@ COLS = [
     "receipt_subject",
     "receipt_text",
     "receipt_html",
+    "thank_you_subject",
+    "thank_you_text",
+    "thank_you_html",
+    "winner_subject",
+    "winner_text",
+    "winner_html",
     "created_at",
     "updated_at",
 ]
 
 
 def get_email_settings(org_id: str) -> Optional[Dict[str, Any]]:
-    sql = f"SELECT {', '.join(COLS)} FROM org_email_settings WHERE org_id=%s"
+    base_cols = [
+        "org_id",
+        "from_name",
+        "from_email",
+        "reply_to",
+        "bcc_to",
+        "receipt_subject",
+        "receipt_text",
+        "receipt_html",
+        "created_at",
+        "updated_at",
+    ]
+    sql = f"SELECT {', '.join(base_cols)} FROM org_email_settings WHERE org_id=%s"
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, (org_id,))
         row = cur.fetchone()
-        return dict(zip(COLS, row)) if row else None
+        if not row:
+            return None
+        out = dict(zip(base_cols, row))
+        for k in (
+            "thank_you_subject",
+            "thank_you_text",
+            "thank_you_html",
+            "winner_subject",
+            "winner_text",
+            "winner_html",
+        ):
+            out.setdefault(k, None)
+        return out
 
 
 def upsert_email_settings(

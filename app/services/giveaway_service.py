@@ -6,6 +6,7 @@ from secrets import choice
 from app.models.campaign import get_campaign_by_id, insert_giveaway_log
 from app.models.donation import list_succeeded_for_campaign, get_donation
 from app.models.org_user import get_user_role_in_org
+from app.services.email_service import send_winner_email
 
 
 def _mask_email(e: Optional[str]) -> Optional[str]:
@@ -133,6 +134,13 @@ def draw_winner_for_campaign(
         population_hash=pop_hash,
         notes=notes,
     )
+
+    winner_email = full.get("donor_email")
+    if winner_email:
+        try:
+            send_winner_email(org_id, camp["title"], winner_email)
+        except Exception:
+            pass
 
     payload = {
         "winner": _serialize_donation_row(full),

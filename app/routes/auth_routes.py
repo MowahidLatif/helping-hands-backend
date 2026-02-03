@@ -1,11 +1,14 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, create_access_token
 from app.services.auth_service import login_user, signup_user
+from app.utils.rate_limit import rate_limit_decorator
 
 auth_bp = Blueprint("auth", __name__)
+_auth_limit = int(__import__("os").getenv("RATE_LIMIT_AUTH_PER_MINUTE", "10"))
 
 
 @auth_bp.post("/register")
+@rate_limit_decorator(_auth_limit, "auth")
 def register():
     data = request.get_json(force=True, silent=True) or {}
     resp = signup_user(data)
@@ -13,6 +16,7 @@ def register():
 
 
 @auth_bp.post("/login")
+@rate_limit_decorator(_auth_limit, "auth")
 def login():
     data = request.get_json(force=True, silent=True) or {}
     resp = login_user(data)

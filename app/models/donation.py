@@ -44,7 +44,9 @@ def set_payment_intent(donation_id: str, pi_id: str) -> None:
 
 
 def get_donation(donation_id: str) -> dict[str, Any] | None:
-    sql = "SELECT id, org_id, campaign_id, amount_cents, currency, donor_email, status, stripe_payment_intent_id FROM donations WHERE id = %s"
+    sql = """SELECT id, org_id, campaign_id, amount_cents, currency, donor_email,
+             status, stripe_payment_intent_id, created_at, updated_at
+             FROM donations WHERE id = %s"""
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, (donation_id,))
         row = cur.fetchone()
@@ -59,6 +61,8 @@ def get_donation(donation_id: str) -> dict[str, Any] | None:
             "donor_email",
             "status",
             "stripe_payment_intent_id",
+            "created_at",
+            "updated_at",
         ]
         return dict(zip(cols, row))
 

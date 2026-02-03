@@ -30,6 +30,21 @@ from app.models.email_receipt import (
     resend_receipt,
     render_receipt_content,
 )
+from app.models.campaign_comment import (
+    create_comment,
+    get_comment,
+    list_comments,
+    update_comment,
+    delete_comment,
+)
+from app.models.campaign_update import (
+    create_update,
+    get_update,
+    list_updates,
+    update_update,
+    delete_update,
+)
+from app.tasks import enqueue_campaign_update_notifications
 import csv
 import io
 
@@ -368,3 +383,143 @@ def preview_receipt_template(campaign_id: str):
 def get_one(campaign_id):
     row = get_campaign(campaign_id)
     return (jsonify(row), 200) if row else ({"error": "not found"}, 404)
+
+
+# --- Comments ---
+
+
+@campaigns.get("/<campaign_id>/comments")
+def list_comments_route(campaign_id):
+    if not _is_uuid(campaign_id):
+        return jsonify({"error": "invalid campaign_id"}), 400
+    camp = get_campaign(campaign_id)
+    if not camp:
+        return jsonify({"error": "not found"}), 404
+    limit = min(int(request.args.get("limit", 50) or 50), 100)
+    after = request.args.get("after")
+    items = list_comments(campaign_id, limit=limit, after=after)
+    return jsonify(items), 200
+
+
+@campaigns.post("/<campaign_id>/comments")
+@jwt_required()
+def create_comment_route(campaign_id):
+    camp = get_campaign(campaign_id)
+    if not camp:
+        return jsonify({"error": "not found"}), 404
+    role = get_user_role_in_org(get_jwt_identity(), camp["org_id"])
+    if not role:
+        return jsonify({"error": "must be org member to comment"}), 403
+    body = (request.get_json(silent=True) or {}).get("body", "")
+    if not body.strip():
+        return jsonify({"error": "body required"}), 400
+    comment = create_comment(campaign_id, get_jwt_identity(), body.strip())
+    return jsonify(comment), 201
+
+
+@campaigns.get("/<campaign_id>/comments/<comment_id>")
+def get_comment_route(campaign_id, comment_id):
+    comment = get_comment(comment_id)
+    if not comment or str(comment["campaign_id"]) != campaign_id:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(comment), 200
+
+
+@campaigns.patch("/<campaign_id>/comments/<comment_id>")
+@jwt_required()
+def patch_comment_route(campaign_id, comment_id):
+    comment = get_comment(comment_id)
+    if not comment or str(comment["campaign_id"]) != campaign_id:
+        return jsonify({"error": "not found"}), 404
+    if str(comment["user_id"]) != get_jwt_identity():
+        return jsonify({"error": "forbidden"}), 403
+    body = (request.get_json(silent=True) or {}).get("body")
+    if body is None:
+        return jsonify({"error": "body required"}), 400
+    updated = update_comment(comment_id, get_jwt_identity(), body.strip())
+    return jsonify(updated), 200
+
+
+@campaigns.delete("/<campaign_id>/comments/<comment_id>")
+@jwt_required()
+def delete_comment_route(campaign_id, comment_id):
+    comment = get_comment(comment_id)
+    if not comment or str(comment["campaign_id"]) != campaign_id:
+        return jsonify({"error": "not found"}), 404
+    if str(comment["user_id"]) != get_jwt_identity():
+        return jsonify({"error": "forbidden"}), 403
+    ok = delete_comment(comment_id, get_jwt_identity())
+    return ("", 204) if ok else (jsonify({"error": "not found"}), 404)
+
+
+# --- Updates ---
+
+
+@campaigns.get("/<campaign_id>/updates")
+def list_updates_route(campaign_id):
+    if not _is_uuid(campaign_id):
+        return jsonify({"error": "invalid campaign_id"}), 400
+    camp = get_campaign(campaign_id)
+    if not camp:
+        return jsonify({"error": "not found"}), 404
+    limit = min(int(request.args.get("limit", 50) or 50), 100)
+    after = request.args.get("after")
+    items = list_updates(campaign_id, limit=limit, after=after)
+    return jsonify(items), 200
+
+
+@campaigns.post("/<campaign_id>/updates")
+@jwt_required()
+def create_update_route(campaign_id):
+    camp = get_campaign(campaign_id)
+    if not camp:
+        return jsonify({"error": "not found"}), 404
+    role = get_user_role_in_org(get_jwt_identity(), camp["org_id"])
+    if role not in ("admin", "owner"):
+        return jsonify({"error": "admin or owner required"}), 403
+    data = request.get_json(silent=True) or {}
+    title = (data.get("title") or "").strip()
+    body = (data.get("body") or "").strip()
+    if not title or not body:
+        return jsonify({"error": "title and body required"}), 400
+    upd = create_update(campaign_id, get_jwt_identity(), title, body)
+    try:
+        enqueue_campaign_update_notifications(campaign_id, upd["id"])
+    except Exception:
+        pass
+    return jsonify(upd), 201
+
+
+@campaigns.get("/<campaign_id>/updates/<update_id>")
+def get_update_route(campaign_id, update_id):
+    upd = get_update(update_id)
+    if not upd or str(upd["campaign_id"]) != campaign_id:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(upd), 200
+
+
+@campaigns.patch("/<campaign_id>/updates/<update_id>")
+@jwt_required()
+def patch_update_route(campaign_id, update_id):
+    upd = get_update(update_id)
+    if not upd or str(upd["campaign_id"]) != campaign_id:
+        return jsonify({"error": "not found"}), 404
+    if str(upd["author_user_id"]) != get_jwt_identity():
+        return jsonify({"error": "forbidden"}), 403
+    data = request.get_json(silent=True) or {}
+    title = (data.get("title") or "").strip() if "title" in data else None
+    body = (data.get("body") or "").strip() if "body" in data else None
+    updated = update_update(update_id, get_jwt_identity(), title, body)
+    return jsonify(updated), 200
+
+
+@campaigns.delete("/<campaign_id>/updates/<update_id>")
+@jwt_required()
+def delete_update_route(campaign_id, update_id):
+    upd = get_update(update_id)
+    if not upd or str(upd["campaign_id"]) != campaign_id:
+        return jsonify({"error": "not found"}), 404
+    if str(upd["author_user_id"]) != get_jwt_identity():
+        return jsonify({"error": "forbidden"}), 403
+    ok = delete_update(update_id, get_jwt_identity())
+    return ("", 204) if ok else (jsonify({"error": "not found"}), 404)

@@ -1,7 +1,45 @@
 from flask import jsonify, Blueprint, request
 from app.services.donation_service import start_checkout
+from app.models.donation import get_donation
+
+
+def _mask_email(email: str | None) -> str | None:
+    if not email:
+        return None
+    local, _, domain = email.partition("@")
+    if not domain:
+        return email
+    if len(local) <= 2:
+        masked = local[:1] + "***"
+    else:
+        masked = local[0] + "***" + local[-1]
+    return masked + "@" + domain
+
 
 donations_bp = Blueprint("donations", __name__)
+
+
+@donations_bp.get("/api/donations/<donation_id>")
+def get_one(donation_id):
+    d = get_donation(donation_id)
+    if not d:
+        return jsonify({"error": "not found"}), 404
+    return (
+        jsonify(
+            {
+                "id": d["id"],
+                "campaign_id": d["campaign_id"],
+                "amount_cents": d["amount_cents"],
+                "currency": d["currency"],
+                "donor": _mask_email(d.get("donor_email")),
+                "status": d["status"],
+                "created_at": (
+                    d.get("created_at").isoformat() if d.get("created_at") else None
+                ),
+            }
+        ),
+        200,
+    )
 
 
 @donations_bp.post("/api/donations/checkout")

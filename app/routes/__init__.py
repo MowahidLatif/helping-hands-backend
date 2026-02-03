@@ -7,6 +7,7 @@ from .media_routes import media_bp
 from .donation_routes import donations_bp
 from .webhook_routes import webhooks_bp
 from .public_routes import public
+from .admin_routes import admin_bp
 
 __all__ = [
     "auth_bp",
@@ -18,4 +19,5 @@ __all__ = [
     "donations_bp",
     "webhooks_bp",
     "public",
+    "admin_bp",
 ]

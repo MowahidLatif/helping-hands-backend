@@ -20,6 +20,37 @@ Currency: {{ donation.currency|upper }}</p>
 <p>— The Team</p>
 """
 
+# Thank-you template (can be used for follow-up or alternative to receipt)
+DEFAULT_THANK_YOU_SUBJECT = "Thank you for supporting {{ campaign.title }}!"
+DEFAULT_THANK_YOU_TEXT = """Hi,
+
+Thank you so much for your generous support of {{ campaign.title }}.
+Your contribution makes a real difference.
+
+— The Team
+"""
+DEFAULT_THANK_YOU_HTML = """<p>Hi,</p>
+<p>Thank you so much for your generous support of <strong>{{ campaign.title }}</strong>.</p>
+<p>Your contribution makes a real difference.</p>
+<p>— The Team</p>
+"""
+
+# Winner notification template
+DEFAULT_WINNER_SUBJECT = "Congratulations! You won the {{ campaign.title }} giveaway!"
+DEFAULT_WINNER_TEXT = """Hi,
+
+Congratulations! You have been selected as the winner of the {{ campaign.title }} giveaway.
+
+We'll be in touch shortly with details on how to claim your prize.
+
+— The Team
+"""
+DEFAULT_WINNER_HTML = """<p>Hi,</p>
+<p><strong>Congratulations!</strong> You have been selected as the winner of the {{ campaign.title }} giveaway.</p>
+<p>We'll be in touch shortly with details on how to claim your prize.</p>
+<p>— The Team</p>
+"""
+
 
 def list_receipts_for_campaign(
     campaign_id: str, limit: int = 50
@@ -136,6 +167,45 @@ def render_receipt_content(org_id: str, donation_row: Dict[str, Any]) -> Dict[st
     body_text = render_template_string(text_tpl, **ctx)
     body_html = render_template_string(html_tpl, **ctx)
     return {"subject": subject, "body_text": body_text, "body_html": body_html}
+
+
+def render_thank_you_content(
+    org_id: str, donation_row: Dict[str, Any]
+) -> Dict[str, str]:
+    camp = get_campaign(donation_row["campaign_id"]) or {}
+    org_cfg = get_email_settings(org_id) or {}
+    subject_tpl = org_cfg.get("thank_you_subject") or DEFAULT_THANK_YOU_SUBJECT
+    text_tpl = org_cfg.get("thank_you_text") or DEFAULT_THANK_YOU_TEXT
+    html_tpl = org_cfg.get("thank_you_html") or DEFAULT_THANK_YOU_HTML
+    ctx = {
+        "org": {"id": org_id},
+        "campaign": {"id": camp.get("id"), "title": camp.get("title", "Our campaign")},
+        "donation": donation_row,
+    }
+    return {
+        "subject": render_template_string(subject_tpl, **ctx),
+        "body_text": render_template_string(text_tpl, **ctx),
+        "body_html": render_template_string(html_tpl, **ctx),
+    }
+
+
+def render_winner_content(
+    org_id: str, campaign_title: str, winner_email: Optional[str] = None
+) -> Dict[str, str]:
+    org_cfg = get_email_settings(org_id) or {}
+    subject_tpl = org_cfg.get("winner_subject") or DEFAULT_WINNER_SUBJECT
+    text_tpl = org_cfg.get("winner_text") or DEFAULT_WINNER_TEXT
+    html_tpl = org_cfg.get("winner_html") or DEFAULT_WINNER_HTML
+    ctx = {
+        "org": {"id": org_id},
+        "campaign": {"title": campaign_title},
+        "winner_email": winner_email,
+    }
+    return {
+        "subject": render_template_string(subject_tpl, **ctx),
+        "body_text": render_template_string(text_tpl, **ctx),
+        "body_html": render_template_string(html_tpl, **ctx),
+    }
 
 
 def insert_receipt_row(
