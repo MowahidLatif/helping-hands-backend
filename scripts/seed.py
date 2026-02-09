@@ -102,6 +102,15 @@ def seed():
 def force_seed():
     """Clear test data and re-seed. Use with caution."""
     with get_db_connection() as conn, conn.cursor() as cur:
+        # Delete giveaway_logs first (FK to donations)
+        cur.execute(
+            """
+            DELETE FROM giveaway_logs
+            WHERE winner_donation_id IN (
+                SELECT id FROM donations WHERE donor_email LIKE '%%@example.com'
+            )
+            """
+        )
         cur.execute("DELETE FROM donations WHERE donor_email LIKE '%%@example.com'")
         cur.execute("DELETE FROM campaign_media WHERE 1=1")
         cur.execute(

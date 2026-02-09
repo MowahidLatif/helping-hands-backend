@@ -24,7 +24,12 @@ load_dotenv(dotenv_path=".env")
 
 
 def create_app():
-    server_name = os.getenv("SERVER_NAME") or "helpinghands.local"
+    # SERVER_NAME must match request Host or Flask returns 404.
+    server_name = os.getenv("SERVER_NAME")
+    # If helpinghands.local, use 127.0.0.1:PORT so requests to localhost work without -H Host
+    if server_name and "helpinghands.local" in server_name:
+        port = os.getenv("PORT", "5050")
+        server_name = f"127.0.0.1:{port}"
     # if "." in server_name:
     #     app = Flask(
     #         __name__,
@@ -43,8 +48,9 @@ def create_app():
         supports_credentials=True,
     )
     app.url_map.strict_slashes = False
-    app.config["SERVER_NAME"] = server_name
-    print(f"*** SERVER_NAME is {app.config['SERVER_NAME']!r}")
+    if server_name:
+        app.config["SERVER_NAME"] = server_name
+        print(f"*** SERVER_NAME is {app.config['SERVER_NAME']!r}")
 
     # JWT
     app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET", "dev-secret")
@@ -80,7 +86,7 @@ def create_app():
 
     @app.get("/__ping")
     def __ping():
-        return {"ok": True, "server_name": app.config["SERVER_NAME"]}, 200
+        return {"ok": True, "server_name": app.config.get("SERVER_NAME")}, 200
 
     app.register_blueprint(core)
     app.register_blueprint(user, url_prefix="/api/users")
