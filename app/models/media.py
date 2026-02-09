@@ -7,11 +7,11 @@ def create_campaign_media(
     org_id: str,
     campaign_id: str,
     type: str,
-    s3_key: str,
-    content_type: str | None,
-    size_bytes: int | None,
-    url: str | None,
-    description: str | None,
+    s3_key: str | None = None,
+    content_type: str | None = None,
+    size_bytes: int | None = None,
+    url: str | None = None,
+    description: str | None = None,
     sort: int | None = 0,
 ) -> dict[str, Any]:
     sql = """

@@ -1,7 +1,16 @@
-from flask import Blueprint, jsonify
+import os
+from flask import Blueprint, jsonify, send_from_directory
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 
 core = Blueprint("core", __name__)
+
+_STATIC = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "static")
+
+
+@core.get("/campaign-stub")
+def campaign_stub():
+    """Serve campaign stub UI for E2E testing."""
+    return send_from_directory(_STATIC, "campaign_stub.html")
 
 
 @core.get("/")

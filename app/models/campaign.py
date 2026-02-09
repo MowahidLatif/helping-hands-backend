@@ -143,15 +143,24 @@ def get_campaign(campaign_id: str) -> dict[str, Any] | None:
         return dict(zip(cols, row))
 
 
-def list_campaigns(org_id: str) -> list[dict[str, Any]]:
+def list_campaigns(
+    org_id: str,
+    status: str | None = None,
+) -> list[dict[str, Any]]:
     sql = """
     SELECT id, org_id, title, slug, goal, status, custom_domain, total_raised, created_at, updated_at
     FROM campaigns
     WHERE org_id = %s
-    ORDER BY created_at DESC
     """
+    params: list[Any] = [org_id]
+    if status:
+        valid = ("draft", "active", "paused", "completed", "archived")
+        if status.lower() in valid:
+            sql += " AND status = %s"
+            params.append(status.lower())
+    sql += " ORDER BY created_at DESC"
     with get_db_connection() as conn, conn.cursor() as cur:
-        cur.execute(sql, (org_id,))
+        cur.execute(sql, tuple(params))
         rows = cur.fetchall()
         cols = [
             "id",

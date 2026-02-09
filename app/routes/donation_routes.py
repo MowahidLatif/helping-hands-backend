@@ -32,6 +32,7 @@ def get_one(donation_id):
                 "amount_cents": d["amount_cents"],
                 "currency": d["currency"],
                 "donor": _mask_email(d.get("donor_email")),
+                "message": d.get("message"),
                 "status": d["status"],
                 "created_at": (
                     d.get("created_at").isoformat() if d.get("created_at") else None
@@ -48,6 +49,7 @@ def checkout():
     campaign_id = body.get("campaign_id")
     amount = body.get("amount")
     donor_email = (body.get("donor_email") or "").strip() or None
+    message = (body.get("message") or "").strip() or None
     if not campaign_id or amount is None:
         return jsonify({"error": "campaign_id and amount are required"}), 400
     try:
@@ -56,6 +58,9 @@ def checkout():
         return jsonify({"error": "amount must be a number"}), 400
 
     resp = start_checkout(
-        campaign_id=campaign_id, amount=amount, donor_email=donor_email
+        campaign_id=campaign_id,
+        amount=amount,
+        donor_email=donor_email,
+        message=message,
     )
     return jsonify(resp), (200 if "clientSecret" in resp else 400)

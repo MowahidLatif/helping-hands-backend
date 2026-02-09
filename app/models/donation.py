@@ -10,14 +10,19 @@ def create_donation(
     amount_cents: int,
     currency: str,
     donor_email: str | None,
+    message: str | None = None,
 ) -> dict[str, Any]:
     sql = """
-    INSERT INTO donations (org_id, campaign_id, amount_cents, currency, donor_email, status)
-    VALUES (%s, %s, %s, %s, %s, 'initiated')
-    RETURNING id, org_id, campaign_id, amount_cents, currency, donor_email, status, created_at, updated_at
+    INSERT INTO donations (org_id, campaign_id, amount_cents, currency, donor_email, message, status)
+    VALUES (%s, %s, %s, %s, %s, %s, 'initiated')
+    RETURNING id, org_id, campaign_id, amount_cents, currency, donor_email, message, status, created_at, updated_at
     """
     with get_db_connection() as conn, conn.cursor() as cur:
-        cur.execute(sql, (org_id, campaign_id, amount_cents, currency, donor_email))
+        msg_val = (message or "").strip()[:2000] or None
+        cur.execute(
+            sql,
+            (org_id, campaign_id, amount_cents, currency, donor_email, msg_val),
+        )
         row = cur.fetchone()
         conn.commit()
         cols = [
@@ -27,6 +32,7 @@ def create_donation(
             "amount_cents",
             "currency",
             "donor_email",
+            "message",
             "status",
             "created_at",
             "updated_at",
@@ -45,7 +51,7 @@ def set_payment_intent(donation_id: str, pi_id: str) -> None:
 
 def get_donation(donation_id: str) -> dict[str, Any] | None:
     sql = """SELECT id, org_id, campaign_id, amount_cents, currency, donor_email,
-             status, stripe_payment_intent_id, created_at, updated_at
+             message, status, stripe_payment_intent_id, created_at, updated_at
              FROM donations WHERE id = %s"""
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, (donation_id,))
@@ -59,6 +65,7 @@ def get_donation(donation_id: str) -> dict[str, Any] | None:
             "amount_cents",
             "currency",
             "donor_email",
+            "message",
             "status",
             "stripe_payment_intent_id",
             "created_at",

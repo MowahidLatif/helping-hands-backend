@@ -12,6 +12,7 @@ from app.models.campaign import (
     list_giveaway_logs,
 )
 from app.utils.slug import slugify
+from app.utils.domain import validate_custom_domain
 import json
 from app.utils.cache import r
 from app.models.donation import (
@@ -64,7 +65,8 @@ def _is_uuid(v: str) -> bool:
 def list_for_org():
     claims = get_jwt()
     org_id = request.args.get("org_id") or claims.get("org_id")
-    items = list_campaigns(org_id)
+    status = request.args.get("status")  # e.g. ?status=active or ?status=completed
+    items = list_campaigns(org_id, status=status)
     return jsonify(items), 200
 
 
@@ -78,7 +80,11 @@ def create():
     org_id = body.get("org_id") or get_jwt().get("org_id")
     goal = float(body.get("goal") or 0)
     status = body.get("status") or "draft"
-    custom_domain = body.get("custom_domain") or None
+    custom_domain = (body.get("custom_domain") or "").strip() or None
+    if custom_domain:
+        ok, err = validate_custom_domain(custom_domain)
+        if not ok:
+            return jsonify({"error": err}), 400
     try:
         camp = create_campaign(
             org_id=org_id,
@@ -114,7 +120,12 @@ def patch(campaign_id):
     if "slug" in body:
         updates["slug"] = slugify(body["slug"])
     if "custom_domain" in body:
-        updates["custom_domain"] = body["custom_domain"] or None
+        val = (body["custom_domain"] or "").strip() or None
+        if val:
+            ok, err = validate_custom_domain(val)
+            if not ok:
+                return jsonify({"error": err}), 400
+        updates["custom_domain"] = val
 
     try:
         newrow = update_campaign(campaign_id, **updates)

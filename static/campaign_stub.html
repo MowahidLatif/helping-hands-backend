@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Campaign Stub – E2E Test</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+    section { margin: 1.5rem 0; padding: 1rem; border: 1px solid #ccc; border-radius: 8px; }
+    input, button { padding: 0.5rem; margin: 0.25rem; }
+    button { cursor: pointer; }
+    .error { color: #c00; }
+    pre { background: #f5f5f5; padding: 0.5rem; overflow: auto; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <h1>Campaign Stub (E2E)</h1>
+
+  <section id="auth">
+    <h2>Login</h2>
+    <input id="email" type="email" placeholder="demo@example.com" value="demo@example.com">
+    <input id="password" type="password" placeholder="Password" value="demo123456">
+    <button onclick="login()">Login</button>
+    <p id="authStatus" class="error"></p>
+  </section>
+
+  <section id="campaigns" style="display:none">
+    <h2>Campaigns</h2>
+    <label>Filter: <select id="statusFilter" onchange="loadCampaigns()">
+      <option value="">All</option>
+      <option value="active">Active</option>
+      <option value="draft">Draft</option>
+      <option value="completed">Completed</option>
+    </select></label>
+    <button onclick="loadCampaigns()">Refresh</button>
+    <div id="campaignList"></div>
+  </section>
+
+  <section id="create" style="display:none">
+    <h2>Create Campaign</h2>
+    <input id="title" placeholder="Title">
+    <input id="goal" type="number" placeholder="Goal (e.g. 1000)">
+    <select id="createStatus">
+      <option value="draft">Draft</option>
+      <option value="active">Active</option>
+    </select>
+    <button onclick="createCampaign()">Create</button>
+  </section>
+
+  <section id="view" style="display:none">
+    <h2>Campaign Detail</h2>
+    <div id="campaignDetail"></div>
+    <h3>Media</h3>
+    <div id="mediaList"></div>
+  </section>
+
+  <script>
+    const API = '';
+    let token = localStorage.getItem('token');
+    let orgId = localStorage.getItem('org_id');
+
+    async function api(path, opts = {}) {
+      const headers = { 'Content-Type': 'application/json', ...opts.headers };
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      const r = await fetch((API || '') + path, { ...opts, headers });
+      const data = r.ok ? await r.json().catch(() => ({})) : { error: await r.text() };
+      return { ok: r.ok, data, status: r.status };
+    }
+
+    async function login() {
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      const r = await api('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      });
+      if (!r.ok) {
+        document.getElementById('authStatus').textContent = r.data.error || 'Login failed';
+        return;
+      }
+      token = r.data.access_token;
+      orgId = r.data.org_id;
+      localStorage.setItem('token', token);
+      localStorage.setItem('org_id', orgId);
+      document.getElementById('authStatus').textContent = 'Logged in';
+      document.getElementById('authStatus').className = '';
+      document.getElementById('campaigns').style.display = 'block';
+      document.getElementById('create').style.display = 'block';
+      loadCampaigns();
+    }
+
+    async function loadCampaigns() {
+      const status = document.getElementById('statusFilter').value;
+      const q = status ? '?status=' + status + '&org_id=' + orgId : '?org_id=' + orgId;
+      const r = await api('/api/campaigns/' + q);
+      const list = document.getElementById('campaignList');
+      if (!r.ok) {
+        list.innerHTML = '<p class="error">' + (r.data.error || 'Failed') + '</p>';
+        return;
+      }
+      list.innerHTML = r.data.length
+        ? r.data.map(c => `<p><strong>${c.title}</strong> (${c.status}) – $${c.goal} / $${c.total_raised || 0} <button onclick="viewCampaign('${c.id}')">View</button></p>`).join('')
+        : '<p>No campaigns.</p>';
+    }
+
+    async function createCampaign() {
+      const title = document.getElementById('title').value.trim();
+      const goal = parseFloat(document.getElementById('goal').value) || 0;
+      const status = document.getElementById('createStatus').value;
+      if (!title) return alert('Title required');
+      const r = await api('/api/campaigns/', {
+        method: 'POST',
+        body: JSON.stringify({ title, goal, status, org_id: orgId }),
+      });
+      if (!r.ok) return alert(r.data.error || 'Create failed');
+      document.getElementById('title').value = '';
+      document.getElementById('goal').value = '';
+      loadCampaigns();
+    }
+
+    async function viewCampaign(id) {
+      const [camp, media] = await Promise.all([
+        api('/api/campaigns/' + id),
+        api('/api/campaigns/' + id + '/media'),
+      ]);
+      document.getElementById('view').style.display = 'block';
+      document.getElementById('campaignDetail').innerHTML = camp.ok
+        ? `<pre>${JSON.stringify(camp.data, null, 2)}</pre>`
+        : '<p class="error">Failed to load</p>';
+      document.getElementById('mediaList').innerHTML = media.ok
+        ? (media.data.length ? media.data.map(m => `<p>${m.type}: ${m.url || m.s3_key}</p>`).join('') : '<p>No media</p>')
+        : '<p class="error">Failed to load media</p>';
+    }
+
+    if (token) {
+      document.getElementById('campaigns').style.display = 'block';
+      document.getElementById('create').style.display = 'block';
+      loadCampaigns();
+    }
+  </script>
+</body>
+</html>

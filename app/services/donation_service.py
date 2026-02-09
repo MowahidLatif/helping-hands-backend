@@ -15,7 +15,11 @@ def _to_cents(amount: float) -> int:
 
 
 def start_checkout(
-    *, campaign_id: str, amount: float, donor_email: str | None = None
+    *,
+    campaign_id: str,
+    amount: float,
+    donor_email: str | None = None,
+    message: str | None = None,
 ) -> Dict[str, Any]:
     camp = get_campaign(campaign_id)
     if not camp:
@@ -31,6 +35,7 @@ def start_checkout(
         amount_cents=amount_cents,
         currency=CURRENCY,
         donor_email=(donor_email or None),
+        message=(message or None),
     )
 
     if not STRIPE_SECRET:

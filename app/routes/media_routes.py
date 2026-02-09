@@ -3,6 +3,14 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.models.campaign import get_campaign
 from app.models.media import create_campaign_media
 from app.utils.s3_helpers import make_key, presign_put, public_url
+from app.utils.embed import validate_embed_url, embed_url_to_iframe_src
+from app.utils.media_validators import (
+    validate_content_type,
+    validate_filename,
+    validate_size,
+    infer_media_type_from_filename,
+    infer_media_type_from_content_type,
+)
 
 media_bp = Blueprint("media", __name__)
 
@@ -11,11 +19,32 @@ media_bp = Blueprint("media", __name__)
 @jwt_required()
 def signed_url():
     campaign_id = request.args.get("campaign_id")
-    filename = request.args.get("filename") or "upload.bin"
-    content_type = request.args.get("content_type") or "application/octet-stream"
+    filename = (request.args.get("filename") or "").strip()
+    content_type = (
+        request.args.get("content_type") or ""
+    ).strip() or "application/octet-stream"
+    mtype = (request.args.get("type") or "other").lower()
     if not campaign_id:
         return jsonify({"error": "campaign_id required"}), 400
+    if not filename:
+        return jsonify({"error": "filename required"}), 400
+    if mtype not in ("image", "video", "doc", "other"):
+        return jsonify({"error": "type must be image, video, doc, or other"}), 400
 
+    # Infer media type from filename if generic
+    if mtype == "other":
+        mtype = (
+            infer_media_type_from_filename(filename)
+            or infer_media_type_from_content_type(content_type)
+            or "other"
+        )
+
+    ok, err = validate_filename(filename, mtype)
+    if not ok:
+        return jsonify({"error": err}), 400
+    ok, err = validate_content_type(content_type, mtype)
+    if not ok:
+        return jsonify({"error": err}), 400
     campaign = get_campaign(campaign_id)
     if not campaign:
         return jsonify({"error": "campaign not found"}), 404
@@ -36,12 +65,9 @@ def signed_url():
 def persist():
     body = request.get_json(force=True, silent=True) or {}
     campaign_id = body.get("campaign_id")
-    key = body.get("key")
     mtype = (body.get("type") or "image").lower()
-    if not campaign_id or not key:
-        return jsonify({"error": "campaign_id and key are required"}), 400
-    if mtype not in ("image", "video", "doc", "other"):
-        return jsonify({"error": "invalid type"}), 400
+    if not campaign_id:
+        return jsonify({"error": "campaign_id required"}), 400
 
     campaign = get_campaign(campaign_id)
     if not campaign:
@@ -53,17 +79,67 @@ def persist():
     if role not in ("admin", "owner"):
         return jsonify({"error": "forbidden"}), 403
 
-    row = create_campaign_media(
-        org_id=campaign["org_id"],
-        campaign_id=campaign_id,
-        type=mtype,
-        s3_key=key,
-        content_type=body.get("content_type"),
-        size_bytes=(
-            int(body["size_bytes"]) if body.get("size_bytes") is not None else None
-        ),
-        url=public_url(key),
-        description=body.get("description"),
-        sort=body.get("sort"),
-    )
+    if mtype == "embed":
+        url = (body.get("url") or "").strip()
+        if not url:
+            return jsonify({"error": "url required for embed type"}), 400
+        ok, err = validate_embed_url(url)
+        if not ok:
+            return jsonify({"error": err}), 400
+        iframe_src = embed_url_to_iframe_src(url)
+        row = create_campaign_media(
+            org_id=campaign["org_id"],
+            campaign_id=campaign_id,
+            type="embed",
+            s3_key=None,
+            content_type="text/html",
+            size_bytes=None,
+            url=iframe_src or url,
+            description=body.get("description"),
+            sort=body.get("sort"),
+        )
+    else:
+        key = body.get("key")
+        if not key:
+            return (
+                jsonify(
+                    {
+                        "error": "key required for uploads (use type=embed for YouTube/Vimeo)"
+                    }
+                ),
+                400,
+            )
+        if mtype not in ("image", "video", "doc", "other"):
+            return jsonify({"error": "invalid type"}), 400
+        # Validate key format and filename (key is org/campaign/uuid-filename.ext)
+        key_filename = key.split("/")[-1] if "/" in key else key
+        ok, err = validate_filename(key_filename, mtype)
+        if not ok:
+            return jsonify({"error": err}), 400
+        ct = body.get("content_type")
+        ok, err = validate_content_type(ct, mtype)
+        if not ok:
+            return jsonify({"error": err}), 400
+        size_bytes = body.get("size_bytes")
+        if size_bytes is not None:
+            try:
+                size_bytes = int(size_bytes)
+            except (TypeError, ValueError):
+                return jsonify({"error": "size_bytes must be an integer"}), 400
+            ok, err = validate_size(size_bytes, mtype)
+            if not ok:
+                return jsonify({"error": err}), 400
+        else:
+            size_bytes = None
+        row = create_campaign_media(
+            org_id=campaign["org_id"],
+            campaign_id=campaign_id,
+            type=mtype,
+            s3_key=key,
+            content_type=ct,
+            size_bytes=size_bytes,
+            url=public_url(key),
+            description=body.get("description"),
+            sort=body.get("sort"),
+        )
     return jsonify(row), 201
