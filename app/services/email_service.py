@@ -129,14 +129,20 @@ def ensure_receipt_for_donation(donation_id: str) -> None:
 
 
 def send_winner_email(
-    org_id: str, campaign_title: str, winner_email: str
+    org_id: str,
+    campaign_title: str,
+    winner_email: str,
+    prize_cents: int | None = None,
 ) -> Optional[str]:
     """
     Send winner notification email. Returns error message on failure, None on success.
+    prize_cents: optional cash prize amount in cents (e.g. 100000 = $1000).
     """
     if not winner_email or not winner_email.strip():
         return None
-    content = render_winner_content(org_id, campaign_title, winner_email)
+    content = render_winner_content(
+        org_id, campaign_title, winner_email, prize_cents=prize_cents
+    )
     org_settings = get_email_settings(org_id)
     from_email = (org_settings or {}).get("from_email")
     from_name = (org_settings or {}).get("from_name")

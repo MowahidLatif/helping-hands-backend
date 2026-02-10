@@ -135,10 +135,16 @@ def draw_winner_for_campaign(
         notes=notes,
     )
 
+    prize_cents = camp.get("giveaway_prize_cents")
+    if prize_cents is not None and prize_cents < 0:
+        prize_cents = None
+
     winner_email = full.get("donor_email")
     if winner_email:
         try:
-            send_winner_email(org_id, camp["title"], winner_email)
+            send_winner_email(
+                org_id, camp["title"], winner_email, prize_cents=prize_cents
+            )
         except Exception:
             pass
 
@@ -156,4 +162,7 @@ def draw_winner_for_campaign(
             "notes": notes,
         },
     }
+    if prize_cents is not None:
+        payload["giveaway_prize_cents"] = prize_cents
+        payload["giveaway_prize"] = round(prize_cents / 100.0, 2)
     return 200, payload

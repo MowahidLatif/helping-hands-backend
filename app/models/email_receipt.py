@@ -36,17 +36,21 @@ DEFAULT_THANK_YOU_HTML = """<p>Hi,</p>
 """
 
 # Winner notification template
+# prize_amount: formatted string e.g. "$1,000.00" when prize set, else None
 DEFAULT_WINNER_SUBJECT = "Congratulations! You won the {{ campaign.title }} giveaway!"
 DEFAULT_WINNER_TEXT = """Hi,
 
-Congratulations! You have been selected as the winner of the {{ campaign.title }} giveaway.
+Congratulations! You have been selected as the winner of the {{ campaign.title }} giveaway.{% if prize_amount %}
+
+Your cash prize: {{ prize_amount }}{% endif %}
 
 We'll be in touch shortly with details on how to claim your prize.
 
 — The Team
 """
 DEFAULT_WINNER_HTML = """<p>Hi,</p>
-<p><strong>Congratulations!</strong> You have been selected as the winner of the {{ campaign.title }} giveaway.</p>
+<p><strong>Congratulations!</strong> You have been selected as the winner of the {{ campaign.title }} giveaway.</p>{% if prize_amount %}
+<p>Your cash prize: <strong>{{ prize_amount }}</strong></p>{% endif %}
 <p>We'll be in touch shortly with details on how to claim your prize.</p>
 <p>— The Team</p>
 """
@@ -190,16 +194,23 @@ def render_thank_you_content(
 
 
 def render_winner_content(
-    org_id: str, campaign_title: str, winner_email: Optional[str] = None
+    org_id: str,
+    campaign_title: str,
+    winner_email: Optional[str] = None,
+    prize_cents: Optional[int] = None,
 ) -> Dict[str, str]:
     org_cfg = get_email_settings(org_id) or {}
     subject_tpl = org_cfg.get("winner_subject") or DEFAULT_WINNER_SUBJECT
     text_tpl = org_cfg.get("winner_text") or DEFAULT_WINNER_TEXT
     html_tpl = org_cfg.get("winner_html") or DEFAULT_WINNER_HTML
+    prize_amount = None
+    if prize_cents is not None and prize_cents > 0:
+        prize_amount = _format_amount(prize_cents)
     ctx = {
         "org": {"id": org_id},
         "campaign": {"title": campaign_title},
         "winner_email": winner_email,
+        "prize_amount": prize_amount,
     }
     return {
         "subject": render_template_string(subject_tpl, **ctx),

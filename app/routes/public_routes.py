@@ -59,7 +59,8 @@ def campaign_public(org_subdomain, camp_slug):
             """
             SELECT id, title, slug,
                    COALESCE(goal, 0) AS goal,
-                   COALESCE(total_raised, 0) AS total_raised
+                   COALESCE(total_raised, 0) AS total_raised,
+                   giveaway_prize_cents
             FROM campaigns
             WHERE org_id=%s AND slug=%s
             """,
@@ -69,15 +70,14 @@ def campaign_public(org_subdomain, camp_slug):
         if not row:
             return jsonify({"error": "campaign not found"}), 404
 
-    return (
-        jsonify(
-            {
-                "id": row[0],
-                "title": row[1],
-                "slug": row[2],
-                "goal": float(row[3]),
-                "total_raised": float(row[4]),
-            }
-        ),
-        200,
-    )
+    resp = {
+        "id": row[0],
+        "title": row[1],
+        "slug": row[2],
+        "goal": float(row[3]),
+        "total_raised": float(row[4]),
+    }
+    if row[5] is not None:
+        resp["giveaway_prize_cents"] = row[5]
+        resp["giveaway_prize"] = round(row[5] / 100.0, 2)
+    return jsonify(resp), 200

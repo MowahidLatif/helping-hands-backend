@@ -95,15 +95,19 @@ def create_campaign(
     goal: float = 0.0,
     status: str = "draft",
     custom_domain: str | None = None,
+    giveaway_prize_cents: int | None = None,
 ) -> dict[str, Any]:
     slug = unique_slug_for_org(org_id, title)
     sql = """
-    INSERT INTO campaigns (org_id, title, slug, goal, status, custom_domain)
-    VALUES (%s, %s, %s, %s, %s, %s)
-    RETURNING id, org_id, title, slug, goal, status, custom_domain, total_raised, created_at, updated_at
+    INSERT INTO campaigns (org_id, title, slug, goal, status, custom_domain, giveaway_prize_cents)
+    VALUES (%s, %s, %s, %s, %s, %s, %s)
+    RETURNING id, org_id, title, slug, goal, status, custom_domain, total_raised, giveaway_prize_cents, created_at, updated_at
     """
     with get_db_connection() as conn, conn.cursor() as cur:
-        cur.execute(sql, (org_id, title, slug, goal, status, custom_domain))
+        cur.execute(
+            sql,
+            (org_id, title, slug, goal, status, custom_domain, giveaway_prize_cents),
+        )
         row = cur.fetchone()
         conn.commit()
         cols = [
@@ -115,6 +119,7 @@ def create_campaign(
             "status",
             "custom_domain",
             "total_raised",
+            "giveaway_prize_cents",
             "created_at",
             "updated_at",
         ]
@@ -124,7 +129,7 @@ def create_campaign(
 def get_campaign(campaign_id: str) -> dict[str, Any] | None:
     sql = """SELECT id, org_id, title, slug, goal, status, custom_domain, total_raised,
              platform_fee_cents, platform_fee_percent, platform_fee_recorded_at,
-             created_at, updated_at FROM campaigns WHERE id = %s"""
+             giveaway_prize_cents, created_at, updated_at FROM campaigns WHERE id = %s"""
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, (campaign_id,))
         row = cur.fetchone()
@@ -142,6 +147,7 @@ def get_campaign(campaign_id: str) -> dict[str, Any] | None:
             "platform_fee_cents",
             "platform_fee_percent",
             "platform_fee_recorded_at",
+            "giveaway_prize_cents",
             "created_at",
             "updated_at",
         ]
@@ -155,7 +161,7 @@ def list_campaigns(
     sql = """
     SELECT id, org_id, title, slug, goal, status, custom_domain, total_raised,
            platform_fee_cents, platform_fee_percent, platform_fee_recorded_at,
-           created_at, updated_at
+           giveaway_prize_cents, created_at, updated_at
     FROM campaigns
     WHERE org_id = %s
     """
@@ -181,6 +187,7 @@ def list_campaigns(
             "platform_fee_cents",
             "platform_fee_percent",
             "platform_fee_recorded_at",
+            "giveaway_prize_cents",
             "created_at",
             "updated_at",
         ]
@@ -224,6 +231,7 @@ def update_campaign(
     status: str | None = None,
     slug: str | None = None,
     custom_domain: str | None = None,
+    giveaway_prize_cents: int | None = None,
 ) -> dict[str, Any] | None:
     sets, params = [], []
     if title is not None:
@@ -241,10 +249,13 @@ def update_campaign(
     if custom_domain is not None:
         sets.append("custom_domain = %s")
         params.append(custom_domain)
+    if giveaway_prize_cents is not None:
+        sets.append("giveaway_prize_cents = %s")
+        params.append(giveaway_prize_cents)
     if not sets:
         return get_campaign(campaign_id)
     sets.append("updated_at = now()")
-    sql = f"UPDATE campaigns SET {', '.join(sets)} WHERE id = %s RETURNING id, org_id, title, slug, goal, status, custom_domain, total_raised, created_at, updated_at"
+    sql = f"UPDATE campaigns SET {', '.join(sets)} WHERE id = %s RETURNING id, org_id, title, slug, goal, status, custom_domain, total_raised, platform_fee_cents, platform_fee_percent, platform_fee_recorded_at, giveaway_prize_cents, created_at, updated_at"
     params.append(campaign_id)
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, tuple(params))
@@ -261,6 +272,10 @@ def update_campaign(
             "status",
             "custom_domain",
             "total_raised",
+            "platform_fee_cents",
+            "platform_fee_percent",
+            "platform_fee_recorded_at",
+            "giveaway_prize_cents",
             "created_at",
             "updated_at",
         ]

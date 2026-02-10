@@ -80,6 +80,14 @@ def create():
     goal = float(body.get("goal") or 0)
     status = body.get("status") or "draft"
     custom_domain = (body.get("custom_domain") or "").strip() or None
+    giveaway_prize_cents = body.get("giveaway_prize_cents")
+    if giveaway_prize_cents is not None:
+        try:
+            giveaway_prize_cents = int(giveaway_prize_cents)
+            if giveaway_prize_cents < 0:
+                giveaway_prize_cents = None
+        except (TypeError, ValueError):
+            giveaway_prize_cents = None
     if custom_domain:
         ok, err = validate_custom_domain(custom_domain)
         if not ok:
@@ -91,6 +99,7 @@ def create():
             goal=goal,
             status=status,
             custom_domain=custom_domain,
+            giveaway_prize_cents=giveaway_prize_cents,
         )
         return jsonify(camp), 201
     except Exception as e:
@@ -125,6 +134,20 @@ def patch(campaign_id):
             if not ok:
                 return jsonify({"error": err}), 400
         updates["custom_domain"] = val
+    if "giveaway_prize_cents" in body:
+        val = body["giveaway_prize_cents"]
+        if val is None:
+            updates["giveaway_prize_cents"] = None
+        else:
+            try:
+                updates["giveaway_prize_cents"] = max(0, int(val))
+            except (TypeError, ValueError):
+                return (
+                    jsonify(
+                        {"error": "giveaway_prize_cents must be a non-negative integer"}
+                    ),
+                    400,
+                )
 
     try:
         newrow = update_campaign(campaign_id, **updates)

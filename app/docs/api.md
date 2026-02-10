@@ -58,6 +58,8 @@ Fee is recorded once (first time goal is reached). Exposed in `GET /campaigns/{i
 ## Giveaway
 - POST /campaigns/{id}/draw-winner
 
+Optional cash prize: campaigns can have `giveaway_prize_cents` (e.g. 100000 = $1000). Set via `POST /campaigns` or `PATCH /campaigns/{id}`. When a winner is drawn, the prize is included in the response and winner email.
+
 ## Comments & Updates
 - CRUD /campaigns/{id}/comments
 - CRUD /campaigns/{id}/updates
