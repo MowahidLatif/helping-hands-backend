@@ -8,7 +8,6 @@ from app.models.campaign import (
     get_campaign,
     update_campaign,
     delete_campaign,
-    get_goal_and_total,
     list_giveaway_logs,
 )
 from app.utils.slug import slugify
@@ -160,10 +159,11 @@ def campaign_progress(campaign_id):
     if cached:
         return jsonify(json.loads(cached)), 200
 
-    vals = get_goal_and_total(campaign_id)
-    if not vals:
+    camp = get_campaign(campaign_id)
+    if not camp:
         return jsonify({"error": "campaign not found"}), 404
-    goal, total = vals
+    goal = float(camp.get("goal", 0))
+    total = float(camp.get("total_raised", 0))
     count, last_dt = count_and_last_succeeded(campaign_id)
 
     percent = 0.0
@@ -178,6 +178,11 @@ def campaign_progress(campaign_id):
         "donations_count": count,
         "last_donation_at": last_dt,
     }
+    fee_cents = camp.get("platform_fee_cents")
+    if fee_cents is not None:
+        resp["platform_fee_cents"] = fee_cents
+        resp["platform_fee_percent"] = float(camp.get("platform_fee_percent") or 0)
+        resp["net_to_org_cents"] = int(total * 100) - int(fee_cents)
     r().setex(key, 30, json.dumps(resp, default=str))
     return jsonify(resp), 200
 

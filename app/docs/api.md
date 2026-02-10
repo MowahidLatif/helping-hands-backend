@@ -36,6 +36,15 @@
 - POST /donations/checkout   # create PaymentIntent, return clientSecret
 - GET  /donations/{id}
 
+## Platform Fees
+When a campaign reaches its goal, a platform fee is charged to the organization (campaign host):
+- 0 - 50,000: 5%
+- 50,000 - 500,000: 4%
+- 500,000 - 1,000,000: 3%
+- 1,000,000+: 2.5%
+
+Fee is recorded once (first time goal is reached). Exposed in `GET /campaigns/{id}`, `GET /campaigns/{id}/progress` via `platform_fee_cents`, `platform_fee_percent`, `net_to_org_cents`.
+
 ## Webhooks
 - POST /webhooks/stripe
 

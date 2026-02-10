@@ -122,7 +122,9 @@ def create_campaign(
 
 
 def get_campaign(campaign_id: str) -> dict[str, Any] | None:
-    sql = "SELECT id, org_id, title, slug, goal, status, custom_domain, total_raised, created_at, updated_at FROM campaigns WHERE id = %s"
+    sql = """SELECT id, org_id, title, slug, goal, status, custom_domain, total_raised,
+             platform_fee_cents, platform_fee_percent, platform_fee_recorded_at,
+             created_at, updated_at FROM campaigns WHERE id = %s"""
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, (campaign_id,))
         row = cur.fetchone()
@@ -137,6 +139,9 @@ def get_campaign(campaign_id: str) -> dict[str, Any] | None:
             "status",
             "custom_domain",
             "total_raised",
+            "platform_fee_cents",
+            "platform_fee_percent",
+            "platform_fee_recorded_at",
             "created_at",
             "updated_at",
         ]
@@ -148,7 +153,9 @@ def list_campaigns(
     status: str | None = None,
 ) -> list[dict[str, Any]]:
     sql = """
-    SELECT id, org_id, title, slug, goal, status, custom_domain, total_raised, created_at, updated_at
+    SELECT id, org_id, title, slug, goal, status, custom_domain, total_raised,
+           platform_fee_cents, platform_fee_percent, platform_fee_recorded_at,
+           created_at, updated_at
     FROM campaigns
     WHERE org_id = %s
     """
@@ -171,10 +178,42 @@ def list_campaigns(
             "status",
             "custom_domain",
             "total_raised",
+            "platform_fee_cents",
+            "platform_fee_percent",
+            "platform_fee_recorded_at",
             "created_at",
             "updated_at",
         ]
         return [dict(zip(cols, r)) for r in rows]
+
+
+def record_platform_fee_if_goal_reached(campaign_id: str) -> bool:
+    """
+    If campaign has reached its goal and no fee has been recorded yet,
+    calculate and record the platform fee. Returns True if fee was recorded.
+    """
+    from app.utils.platform_fees import calculate_platform_fee
+
+    sql = """SELECT goal, total_raised, platform_fee_recorded_at
+             FROM campaigns WHERE id = %s"""
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (campaign_id,))
+        row = cur.fetchone()
+        if not row:
+            return False
+        goal, total_raised, fee_recorded_at = float(row[0]), float(row[1]), row[2]
+        if fee_recorded_at is not None or goal <= 0 or total_raised < goal:
+            return False
+        pct, _, fee_cents = calculate_platform_fee(total_raised)
+        cur.execute(
+            """UPDATE campaigns
+               SET platform_fee_cents = %s, platform_fee_percent = %s,
+                   platform_fee_recorded_at = now(), updated_at = now()
+               WHERE id = %s""",
+            (fee_cents, pct, campaign_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
 
 
 def update_campaign(

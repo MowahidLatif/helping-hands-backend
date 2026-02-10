@@ -9,7 +9,10 @@ from app.models.donation import (
     set_status_by_id,
     get_donation,
 )
-from app.models.campaign import recompute_total_raised
+from app.models.campaign import (
+    recompute_total_raised,
+    record_platform_fee_if_goal_reached,
+)
 from app.utils.cache import r
 from app.realtime import socketio
 from app.models.stripe_event import mark_event_processed
@@ -137,6 +140,11 @@ def process_stripe_event(
                 r().delete(f"campaign:{cid}:progress:v1")
             except Exception:
                 pass
+            if new_status == "succeeded":
+                try:
+                    record_platform_fee_if_goal_reached(cid)
+                except Exception as fee_err:
+                    print("[platform fee error]", str(fee_err))
 
             if new_status == "succeeded":
                 amount_cents = int((d or {}).get("amount_cents") or 0)
