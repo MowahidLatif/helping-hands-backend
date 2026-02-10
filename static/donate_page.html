@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Donate</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, sans-serif; line-height: 1.5; color: #222; }
+    .block { padding: 1.5rem; max-width: 720px; margin: 0 auto; }
+    .block.hero { text-align: center; padding: 3rem 1.5rem; background: linear-gradient(135deg, #1a365d 0%, #2c5282 100%); color: #fff; }
+    .block.hero h1 { margin: 0 0 0.5rem; font-size: 2rem; }
+    .block.hero p { margin: 0; opacity: 0.9; }
+    .block.campaign_info { background: #f7fafc; border-radius: 8px; margin: 1rem auto; }
+    .block.campaign_info .progress { height: 8px; background: #e2e8f0; border-radius: 4px; overflow: hidden; margin-top: 0.5rem; }
+    .block.campaign_info .progress-fill { height: 100%; background: #38a169; }
+    .block.donate_button { text-align: center; padding: 2rem; }
+    .block.donate_button button { padding: 1rem 2rem; font-size: 1.25rem; background: #3182ce; color: #fff; border: none; border-radius: 8px; cursor: pointer; }
+    .block.donate_button button:hover { background: #2c5282; }
+    .block.donate_button .presets { margin: 1rem 0; }
+    .block.donate_button .presets button { padding: 0.5rem 1rem; margin: 0.25rem; font-size: 1rem; background: #e2e8f0; color: #2d3748; }
+    .block.text { padding: 1rem 1.5rem; }
+    .block.text.center { text-align: center; }
+    .block.text.right { text-align: right; }
+    .block.footer { padding: 1rem; font-size: 0.875rem; color: #718096; text-align: center; border-top: 1px solid #e2e8f0; }
+  </style>
+</head>
+<body>
+  <div id="root"><p style="padding: 2rem; text-align: center;">Loading…</p></div>
+  <script>
+    (function() {
+      const path = window.location.pathname;
+      const pathMatch = path.match(/\/donate\/([^/]+)(?:\/([^/]+))?/);
+      let apiPath, slug;
+      if (pathMatch && pathMatch[2]) {
+        slug = pathMatch[2];
+        apiPath = '/api/public/' + pathMatch[1] + '/' + slug;
+      } else if (pathMatch) {
+        slug = pathMatch[1];
+        apiPath = '/' + slug;
+      } else {
+        document.getElementById('root').innerHTML = '<p style="padding: 2rem;">Campaign not found.</p>';
+        return;
+      }
+      fetch(apiPath, { headers: { 'Accept': 'application/json' } })
+        .then(r => r.ok ? r.json() : Promise.reject(new Error('Not found')))
+        .then(data => { window._campaignData = data; render(data, slug); })
+        .catch(() => { document.getElementById('root').innerHTML = '<p style="padding: 2rem;">Campaign not found.</p>'; });
+    })();
+
+    function render(data, slug) {
+      const blocks = (data.page_layout && data.page_layout.blocks) || defaultBlocks(data);
+      const html = blocks.map(b => renderBlock(b, data)).join('');
+      document.title = data.title || 'Donate';
+      document.getElementById('root').innerHTML = html;
+    }
+
+    function defaultBlocks(data) {
+      return [
+        { id: 'hero-1', type: 'hero', props: { title: data.title || 'Campaign', subtitle: 'Thank you for your support.' } },
+        { id: 'info-1', type: 'campaign_info', props: { show_goal: true, show_progress_bar: true, show_donations_count: true } },
+        { id: 'donate-1', type: 'donate_button', props: { preset_amounts: [5, 10, 25, 50, 100], label: 'Donate' } },
+        { id: 'footer-1', type: 'footer', props: { show_org_name: true } }
+      ];
+    }
+
+    function renderBlock(block, data) {
+      const p = block.props || {};
+      switch (block.type) {
+        case 'hero':
+          return `<div class="block hero"><h1>${esc(p.title || data.title)}</h1><p>${esc(p.subtitle || '')}</p></div>`;
+        case 'campaign_info':
+          const goal = data.goal || 0;
+          const raised = data.total_raised || 0;
+          const pct = goal > 0 ? Math.min(100, (raised / goal) * 100) : 0;
+          let info = '';
+          if (p.show_goal !== false) info += `<p><strong>$${Number(raised).toLocaleString()}</strong> of $${Number(goal).toLocaleString()} goal</p>`;
+          if (p.show_progress_bar !== false && goal > 0) info += `<div class="progress"><div class="progress-fill" style="width:${pct}%"></div></div>`;
+          return `<div class="block campaign_info">${info}</div>`;
+        case 'donate_button':
+          const presets = (p.preset_amounts || [5, 10, 25, 50]).map(a => `<button onclick="window.donate(${a})">$${a}</button>`).join('');
+          return `<div class="block donate_button"><div class="presets">${presets}</div><button onclick="window.donate()">${esc(p.label || 'Donate')}</button></div>`;
+        case 'text':
+          const align = p.align || 'left';
+          return `<div class="block text ${align}">${(p.content || '').replace(/\n/g, '<br>')}</div>`;
+        case 'footer':
+          return `<div class="block footer"><p>${esc(p.text || '')} ${p.show_org_name ? '&middot; Powered by Helping Hands' : ''}</p></div>`;
+        case 'media_gallery':
+          return `<div class="block media_gallery"><p>[Media gallery – fetch from /api/campaigns/${data.id}/media]</p></div>`;
+        case 'embed':
+          return `<div class="block embed"><iframe src="${esc(p.url || '')}" width="100%" height="${p.height || 400}" frameborder="0"></iframe></div>`;
+        default:
+          return `<div class="block">[Unknown block: ${block.type}]</div>`;
+      }
+    }
+
+    function esc(s) {
+      if (s == null) return '';
+      const d = document.createElement('div');
+      d.textContent = String(s);
+      return d.innerHTML;
+    }
+
+    window.donate = function(amount) {
+      const d = window._campaignData;
+      if (!d || !d.id) return alert('Campaign not loaded.');
+      const amt = amount != null ? amount : '';
+      alert('Donate $' + (amt || 'custom') + ' to ' + d.title + '.\n\nIntegrate with POST /api/donations/checkout (campaign_id, amount, donor_email).');
+    };
+  </script>
+</body>
+</html>

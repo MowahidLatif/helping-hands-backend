@@ -6,12 +6,15 @@ from app.models.campaign import (
     list_campaigns,
     create_campaign,
     get_campaign,
+    get_page_layout,
+    set_page_layout,
     update_campaign,
     delete_campaign,
     list_giveaway_logs,
 )
 from app.utils.slug import slugify
 from app.utils.domain import validate_custom_domain
+from app.utils.page_layout import validate_layout
 import json
 from app.utils.cache import r
 from app.models.donation import (
@@ -422,6 +425,39 @@ def preview_receipt_template(campaign_id: str):
 def get_one(campaign_id):
     row = get_campaign(campaign_id)
     return (jsonify(row), 200) if row else ({"error": "not found"}, 404)
+
+
+@campaigns.get("/<campaign_id>/page-layout")
+@jwt_required()
+def get_page_layout_route(campaign_id):
+    camp = get_campaign(campaign_id)
+    if not camp:
+        return jsonify({"error": "not found"}), 404
+    role = get_user_role_in_org(get_jwt_identity(), camp["org_id"])
+    if role not in ("admin", "owner"):
+        return jsonify({"error": "forbidden"}), 403
+    layout = get_page_layout(campaign_id)
+    return jsonify({"page_layout": layout}), 200
+
+
+@campaigns.put("/<campaign_id>/page-layout")
+@jwt_required()
+def put_page_layout_route(campaign_id):
+    camp = get_campaign(campaign_id)
+    if not camp:
+        return jsonify({"error": "not found"}), 404
+    role = get_user_role_in_org(get_jwt_identity(), camp["org_id"])
+    if role not in ("admin", "owner"):
+        return jsonify({"error": "forbidden"}), 403
+    body = request.get_json(silent=True) or {}
+    layout = body.get("page_layout")
+    if layout is not None:
+        ok, err = validate_layout(layout)
+        if not ok:
+            return jsonify({"error": err}), 400
+    if not set_page_layout(campaign_id, layout):
+        return jsonify({"error": "not found"}), 404
+    return jsonify({"page_layout": get_page_layout(campaign_id)}), 200
 
 
 # --- Comments ---

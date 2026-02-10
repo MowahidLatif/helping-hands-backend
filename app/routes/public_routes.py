@@ -1,7 +1,9 @@
-from flask import Blueprint, jsonify
+import os
+from flask import Blueprint, jsonify, send_from_directory
 from app.utils.db import get_db_connection
 
 public = Blueprint("public", __name__, subdomain="<org_subdomain>")
+_STATIC = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "static")
 
 
 def _get_org_id_by_subdomain(cur, subdomain: str):
@@ -60,7 +62,8 @@ def campaign_public(org_subdomain, camp_slug):
             SELECT id, title, slug,
                    COALESCE(goal, 0) AS goal,
                    COALESCE(total_raised, 0) AS total_raised,
-                   giveaway_prize_cents
+                   giveaway_prize_cents,
+                   page_layout
             FROM campaigns
             WHERE org_id=%s AND slug=%s
             """,
@@ -80,4 +83,24 @@ def campaign_public(org_subdomain, camp_slug):
     if row[5] is not None:
         resp["giveaway_prize_cents"] = row[5]
         resp["giveaway_prize"] = round(row[5] / 100.0, 2)
+    if row[6] is not None:
+        resp["page_layout"] = row[6]
     return jsonify(resp), 200
+
+
+@public.get("/donate/<camp_slug>")
+def donate_page(org_subdomain, camp_slug):
+    """
+    Serve the donor-facing donation page. Renders layout from campaign.page_layout.
+    """
+    with get_db_connection() as conn, conn.cursor() as cur:
+        org_id = _get_org_id_by_subdomain(cur, org_subdomain)
+        if not org_id:
+            return jsonify({"error": "org not found"}), 404
+        cur.execute(
+            "SELECT 1 FROM campaigns WHERE org_id=%s AND slug=%s",
+            (org_id, camp_slug),
+        )
+        if not cur.fetchone():
+            return jsonify({"error": "campaign not found"}), 404
+    return send_from_directory(_STATIC, "donate_page.html")

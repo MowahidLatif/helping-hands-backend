@@ -27,6 +27,13 @@
 - PATCH /campaigns/{id}
 - DELETE /campaigns/{id}
 
+## Page Layout (drag-and-drop builder)
+- GET /campaigns/{id}/page-layout   # get saved layout
+- PUT /campaigns/{id}/page-layout   # save layout { "page_layout": { "blocks": [...] } }
+
+Block types: hero, campaign_info, donate_button, media_gallery, text, embed, footer.
+Public campaign JSON includes page_layout. Donor page: {subdomain}.domain/donate/{slug}
+
 ## Media
 - GET /media/signed-url   # presigned PUT (key, content-type, max-bytes)
 - POST /media              # persist metadata

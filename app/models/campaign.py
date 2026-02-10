@@ -129,7 +129,7 @@ def create_campaign(
 def get_campaign(campaign_id: str) -> dict[str, Any] | None:
     sql = """SELECT id, org_id, title, slug, goal, status, custom_domain, total_raised,
              platform_fee_cents, platform_fee_percent, platform_fee_recorded_at,
-             giveaway_prize_cents, created_at, updated_at FROM campaigns WHERE id = %s"""
+             giveaway_prize_cents, page_layout, created_at, updated_at FROM campaigns WHERE id = %s"""
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, (campaign_id,))
         row = cur.fetchone()
@@ -148,10 +148,31 @@ def get_campaign(campaign_id: str) -> dict[str, Any] | None:
             "platform_fee_percent",
             "platform_fee_recorded_at",
             "giveaway_prize_cents",
+            "page_layout",
             "created_at",
             "updated_at",
         ]
         return dict(zip(cols, row))
+
+
+def get_page_layout(campaign_id: str) -> dict[str, Any] | None:
+    """Return page_layout for campaign, or None if not found."""
+    sql = "SELECT page_layout FROM campaigns WHERE id = %s"
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (campaign_id,))
+        row = cur.fetchone()
+        return row[0] if row and row[0] is not None else None
+
+
+def set_page_layout(campaign_id: str, layout: dict[str, Any] | None) -> bool:
+    """Set page_layout for campaign. Returns True if updated."""
+    from psycopg2.extras import Json
+
+    sql = "UPDATE campaigns SET page_layout = %s, updated_at = now() WHERE id = %s"
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (Json(layout) if layout else None, campaign_id))
+        conn.commit()
+        return cur.rowcount > 0
 
 
 def list_campaigns(
@@ -161,7 +182,7 @@ def list_campaigns(
     sql = """
     SELECT id, org_id, title, slug, goal, status, custom_domain, total_raised,
            platform_fee_cents, platform_fee_percent, platform_fee_recorded_at,
-           giveaway_prize_cents, created_at, updated_at
+           giveaway_prize_cents, page_layout, created_at, updated_at
     FROM campaigns
     WHERE org_id = %s
     """
@@ -188,6 +209,7 @@ def list_campaigns(
             "platform_fee_percent",
             "platform_fee_recorded_at",
             "giveaway_prize_cents",
+            "page_layout",
             "created_at",
             "updated_at",
         ]
@@ -255,7 +277,7 @@ def update_campaign(
     if not sets:
         return get_campaign(campaign_id)
     sets.append("updated_at = now()")
-    sql = f"UPDATE campaigns SET {', '.join(sets)} WHERE id = %s RETURNING id, org_id, title, slug, goal, status, custom_domain, total_raised, platform_fee_cents, platform_fee_percent, platform_fee_recorded_at, giveaway_prize_cents, created_at, updated_at"
+    sql = f"UPDATE campaigns SET {', '.join(sets)} WHERE id = %s RETURNING id, org_id, title, slug, goal, status, custom_domain, total_raised, platform_fee_cents, platform_fee_percent, platform_fee_recorded_at, giveaway_prize_cents, page_layout, created_at, updated_at"
     params.append(campaign_id)
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, tuple(params))
@@ -276,6 +298,7 @@ def update_campaign(
             "platform_fee_percent",
             "platform_fee_recorded_at",
             "giveaway_prize_cents",
+            "page_layout",
             "created_at",
             "updated_at",
         ]
