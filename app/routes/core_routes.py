@@ -1,4 +1,5 @@
 import os
+import request
 from flask import Blueprint, jsonify, send_from_directory
 from app.utils.page_layout import BLOCK_TYPES, BLOCK_SCHEMA
 from app.utils.db import get_db_connection
@@ -103,10 +104,14 @@ def api_index():
 @jwt_required()
 def me():
     claims = get_jwt()
+    auth_header = request.headers.get("Authorization", "")
     return jsonify(
         {
             "user_id": get_jwt_identity(),
             "org_id": claims.get("org_id"),
             "role": claims.get("role"),
+            "token_preview": (
+                auth_header[:50] + "..." if len(auth_header) > 50 else auth_header
+            ),
         }
     )

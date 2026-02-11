@@ -39,8 +39,20 @@ def _make_tokens(
 def signup_user(data: dict) -> dict:
     email = _normalize_email(data.get("email", ""))
     password = data.get("password") or ""
-    name = (data.get("name") or "").strip() or None
-    org_name = (data.get("organization_name") or "").strip() or None
+
+    # Support both old and new field names
+    first_name = (data.get("first_name") or "").strip()
+    last_name = (data.get("last_name") or "").strip()
+    name = (data.get("name") or "").strip()
+    if not name and (first_name or last_name):
+        name = f"{first_name} {last_name}".strip()
+    name = name or None
+
+    # Support both org_name and organization_name
+    org_name = (
+        data.get("org_name") or data.get("organization_name") or ""
+    ).strip() or None
+    org_subdomain = (data.get("org_subdomain") or "").strip() or None
 
     if not EMAIL_RE.match(email):
         return {"error": "Invalid email format"}
@@ -52,11 +64,17 @@ def signup_user(data: dict) -> dict:
     user = create_user(email=email, password_hash=_hash_password(password), name=name)
     if not org_name:
         org_name = email.split("@", 1)[0] + "'s Org"
-    org = create_organization(org_name)
+    org = create_organization(org_name, subdomain=org_subdomain)
     add_user_to_org(org_id=org["id"], user_id=user["id"], role="owner")
 
     tokens = _make_tokens(user["id"], {"org_id": org["id"], "role": "owner"})
-    return {"id": user["id"], "email": user["email"], "org_id": org["id"], **tokens}
+    return {
+        "id": user["id"],
+        "email": user["email"],
+        "name": user.get("name"),
+        "org_id": org["id"],
+        **tokens,
+    }
 
 
 def login_user(data: dict) -> dict:
@@ -73,4 +91,9 @@ def login_user(data: dict) -> dict:
         claims = {"org_id": org_role[0], "role": org_role[1]}
 
     tokens = _make_tokens(user["id"], claims)
-    return {"id": user["id"], "email": user["email"], **tokens}
+    return {
+        "id": user["id"],
+        "email": user["email"],
+        "name": user.get("name"),
+        **tokens,
+    }
