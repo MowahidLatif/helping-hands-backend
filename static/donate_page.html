@@ -33,9 +33,11 @@
       const pathMatch = path.match(/\/donate\/([^/]+)(?:\/([^/]+))?/);
       let apiPath, slug;
       if (pathMatch && pathMatch[2]) {
+        // Path mode: /donate/org/slug -> /api/public/org/slug
         slug = pathMatch[2];
         apiPath = '/api/public/' + pathMatch[1] + '/' + slug;
       } else if (pathMatch) {
+        // Subdomain mode: /donate/slug -> /slug (org from subdomain)
         slug = pathMatch[1];
         apiPath = '/' + slug;
       } else {
@@ -45,7 +47,10 @@
       fetch(apiPath, { headers: { 'Accept': 'application/json' } })
         .then(r => r.ok ? r.json() : Promise.reject(new Error('Not found')))
         .then(data => { window._campaignData = data; render(data, slug); })
-        .catch(() => { document.getElementById('root').innerHTML = '<p style="padding: 2rem;">Campaign not found.</p>'; });
+        .catch(err => { 
+          console.error('Fetch error:', err);
+          document.getElementById('root').innerHTML = '<p style="padding: 2rem;">Campaign not found.</p>'; 
+        });
     })();
 
     function render(data, slug) {
