@@ -1,6 +1,5 @@
 import os
-import request
-from flask import Blueprint, jsonify, send_from_directory
+from flask import Blueprint, jsonify, request, send_from_directory
 from app.utils.page_layout import BLOCK_TYPES, BLOCK_SCHEMA
 from app.utils.db import get_db_connection
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt

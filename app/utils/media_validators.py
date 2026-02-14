@@ -149,6 +149,31 @@ def infer_media_type_from_content_type(content_type: str | None) -> str:
     return "other"
 
 
+# Extension to MIME type mapping (for when browser sends application/octet-stream)
+EXT_TO_CONTENT_TYPE = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
+    ".mov": "video/quicktime",
+    ".pdf": "application/pdf",
+}
+
+
+def infer_content_type_from_filename(filename: str | None) -> str | None:
+    """
+    Infer content_type from filename extension. Used when browser sends generic
+    application/octet-stream (common for images on some browsers).
+    """
+    if not filename or "." not in filename:
+        return None
+    ext = "." + filename.rsplit(".", 1)[-1].lower()
+    return EXT_TO_CONTENT_TYPE.get(ext)
+
+
 def infer_media_type_from_filename(filename: str | None) -> str:
     """
     Infer media type from filename extension.

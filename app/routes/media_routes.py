@@ -2,7 +2,7 @@ from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.models.campaign import get_campaign
 from app.models.media import create_campaign_media
-from app.utils.s3_helpers import make_key, presign_put, public_url
+from app.utils.s3_helpers import make_key, presign_put, public_url, upload_object
 from app.utils.embed import validate_embed_url, embed_url_to_iframe_src
 from app.utils.media_validators import (
     validate_content_type,
@@ -10,6 +10,7 @@ from app.utils.media_validators import (
     validate_size,
     infer_media_type_from_filename,
     infer_media_type_from_content_type,
+    infer_content_type_from_filename,
 )
 
 media_bp = Blueprint("media", __name__)
@@ -58,6 +59,82 @@ def signed_url():
     key = make_key(campaign["org_id"], campaign_id, filename)
     signed = presign_put(key, content_type)
     return jsonify({"key": key, **signed}), 200
+
+
+@media_bp.post("/api/media/upload")
+@jwt_required()
+def upload():
+    """
+    Accept multipart file upload, upload to S3, persist metadata.
+    Form fields: file (required), campaign_id (required), description (optional), sort (optional).
+    """
+    campaign_id = request.form.get("campaign_id", "").strip()
+    if not campaign_id:
+        return jsonify({"error": "campaign_id required"}), 400
+
+    campaign = get_campaign(campaign_id)
+    if not campaign:
+        return jsonify({"error": "campaign not found"}), 404
+
+    from app.models.org_user import get_user_role_in_org
+
+    role = get_user_role_in_org(get_jwt_identity(), campaign["org_id"])
+    if role not in ("admin", "owner"):
+        return jsonify({"error": "forbidden"}), 403
+
+    file = request.files.get("file")
+    if not file or not file.filename:
+        return jsonify({"error": "file required"}), 400
+
+    filename = file.filename.strip()
+    content_type = (file.content_type or "").strip() or "application/octet-stream"
+    # Browsers sometimes send application/octet-stream for images; infer from extension
+    if content_type == "application/octet-stream":
+        inferred_ct = infer_content_type_from_filename(filename)
+        if inferred_ct:
+            content_type = inferred_ct
+    mtype = (
+        infer_media_type_from_filename(filename)
+        or infer_media_type_from_content_type(content_type)
+        or "image"
+    )
+    if mtype not in ("image", "video", "doc"):
+        mtype = "image"
+
+    ok, err = validate_filename(filename, mtype)
+    if not ok:
+        return jsonify({"error": err}), 400
+    ok, err = validate_content_type(content_type, mtype)
+    if not ok:
+        return jsonify({"error": err}), 400
+
+    file_bytes = file.read()
+    size_bytes = len(file_bytes)
+    ok, err = validate_size(size_bytes, mtype)
+    if not ok:
+        return jsonify({"error": err}), 400
+
+    key = make_key(campaign["org_id"], campaign_id, filename)
+    upload_object(key, file_bytes, content_type)
+
+    sort_val = request.form.get("sort")
+    try:
+        sort = int(sort_val) if sort_val is not None and sort_val != "" else None
+    except (TypeError, ValueError):
+        sort = None
+
+    row = create_campaign_media(
+        org_id=campaign["org_id"],
+        campaign_id=campaign_id,
+        type=mtype,
+        s3_key=key,
+        content_type=content_type,
+        size_bytes=size_bytes,
+        url=public_url(key),
+        description=request.form.get("description") or None,
+        sort=sort,
+    )
+    return jsonify(row), 201
 
 
 @media_bp.post("/api/media")

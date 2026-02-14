@@ -51,6 +51,17 @@ def presign_put(key: str, content_type: str, expires: int = 3600) -> dict:
     return {"upload_url": url, "required_headers": {"Content-Type": content_type}}
 
 
+def upload_object(key: str, body: bytes, content_type: str) -> None:
+    """Upload bytes directly to S3."""
+    s3 = _client()
+    s3.put_object(
+        Bucket=S3_BUCKET,
+        Key=key,
+        Body=body,
+        ContentType=content_type,
+    )
+
+
 def public_url(key: str) -> str:
     if USE_PATH:
         return f"{S3_ENDPOINT.rstrip('/')}/{S3_BUCKET}/{key}"
