@@ -1,6 +1,7 @@
 import os
 from flask import Blueprint, jsonify, send_from_directory
 from app.utils.db import get_db_connection
+from app.models.campaign import get_latest_winner_public
 
 public = Blueprint("public", __name__, subdomain="<org_subdomain>")
 _STATIC = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "static")
@@ -74,7 +75,7 @@ def campaign_public(org_subdomain, camp_slug):
             return jsonify({"error": "campaign not found"}), 404
 
     resp = {
-        "id": row[0],
+        "id": str(row[0]),
         "title": row[1],
         "slug": row[2],
         "goal": float(row[3]),
@@ -85,6 +86,9 @@ def campaign_public(org_subdomain, camp_slug):
         resp["giveaway_prize"] = round(row[5] / 100.0, 2)
     if row[6] is not None:
         resp["page_layout"] = row[6]
+    latest = get_latest_winner_public(str(row[0]))
+    if latest:
+        resp["latest_winner"] = latest
     return jsonify(resp), 200
 
 

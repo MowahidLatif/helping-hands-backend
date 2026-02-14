@@ -3,6 +3,7 @@ from uuid import UUID
 from flask import Blueprint, jsonify, request, send_from_directory
 from app.utils.page_layout import BLOCK_TYPES, BLOCK_SCHEMA
 from app.utils.db import get_db_connection
+from app.models.campaign import get_latest_winner_public
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 
 core = Blueprint("core", __name__)
@@ -76,6 +77,9 @@ def campaign_public_no_subdomain(org_subdomain, camp_slug):
         resp["giveaway_prize"] = round(row[5] / 100.0, 2)
     if row[6] is not None:
         resp["page_layout"] = row[6]
+    latest = get_latest_winner_public(str(row[0]))
+    if latest:
+        resp["latest_winner"] = latest
     return jsonify(resp), 200
 
 
@@ -116,6 +120,9 @@ def campaign_public_by_id(campaign_id):
         resp["giveaway_prize"] = round(row[5] / 100.0, 2)
     if row[6] is not None:
         resp["page_layout"] = row[6]
+    latest = get_latest_winner_public(campaign_id)
+    if latest:
+        resp["latest_winner"] = latest
     return jsonify(resp), 200
 
 

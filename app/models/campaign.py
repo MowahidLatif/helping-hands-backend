@@ -407,22 +407,82 @@ def insert_giveaway_log(
         return dict(zip(cols, row))
 
 
+def _mask_email(e: str | None) -> str | None:
+    """Mask email for public display (e.g. j***n@example.com)."""
+    if not e:
+        return None
+    local, _, domain = e.partition("@")
+    if not domain:
+        return e
+    if len(local) <= 2:
+        masked = local[:1] + "***"
+    else:
+        masked = local[0] + "***" + local[-1]
+    return masked + "@" + domain
+
+
+def get_latest_winner_public(campaign_id: str) -> dict[str, Any] | None:
+    """
+    Fetch the most recent giveaway winner for public display.
+    Returns { donor, amount_cents, created_at } or None.
+    """
+    sql = """
+      SELECT gl.winner_donation_id, gl.created_at, d.amount_cents, d.donor_email
+      FROM giveaway_logs gl
+      LEFT JOIN donations d ON d.id = gl.winner_donation_id
+      WHERE gl.campaign_id = %s AND gl.winner_donation_id IS NOT NULL
+      ORDER BY gl.created_at DESC
+      LIMIT 1
+    """
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (campaign_id,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        winner_donation_id, created_at, amount_cents, donor_email = row
+        donor = _mask_email(donor_email) if donor_email else "Anonymous"
+        return {
+            "donor": donor,
+            "amount_cents": int(amount_cents or 0),
+            "created_at": (
+                created_at.isoformat()
+                if hasattr(created_at, "isoformat")
+                else str(created_at)
+            ),
+        }
+
+
 def list_giveaway_logs(campaign_id: str, limit: int = 20) -> list[dict]:
     sql = """
-      SELECT campaign_id, winner_donation_id, mode, population_count, created_at
-      FROM giveaway_logs
-      WHERE campaign_id = %s
-      ORDER BY created_at DESC
+      SELECT gl.campaign_id, gl.winner_donation_id, gl.mode, gl.population_count, gl.created_at,
+             d.donor_email
+      FROM giveaway_logs gl
+      LEFT JOIN donations d ON d.id = gl.winner_donation_id
+      WHERE gl.campaign_id = %s
+      ORDER BY gl.created_at DESC
       LIMIT %s
     """
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, (campaign_id, limit))
         rows = cur.fetchall()
-        cols = [
-            "campaign_id",
-            "winner_donation_id",
-            "mode",
-            "population_count",
-            "created_at",
-        ]
-        return [dict(zip(cols, r)) for r in rows]
+        result = []
+        for r in rows:
+            donor_email = r[5] if len(r) > 5 else None
+            created_at = r[4]
+            result.append(
+                {
+                    "campaign_id": r[0],
+                    "winner_donation_id": r[1],
+                    "mode": r[2],
+                    "population_count": r[3],
+                    "created_at": (
+                        created_at.isoformat()
+                        if hasattr(created_at, "isoformat")
+                        else str(created_at)
+                    ),
+                    "winner_donor": (
+                        _mask_email(donor_email) if donor_email else "Anonymous"
+                    ),
+                }
+            )
+        return result

@@ -41,6 +41,7 @@ BLOCK_SCHEMA = {
             "show_goal": "boolean",
             "show_progress_bar": "boolean",
             "show_donations_count": "boolean",
+            "show_winner": "boolean",
         },
     },
     "donate_button": {
@@ -90,9 +91,19 @@ def _valid_props_for_type(block_type: str, props: Any) -> tuple[bool, str | None
                 return False, f"hero.{k} too long"
     elif block_type == "campaign_info":
         for k in props:
-            if k not in ("show_goal", "show_progress_bar", "show_donations_count"):
+            if k not in (
+                "show_goal",
+                "show_progress_bar",
+                "show_donations_count",
+                "show_winner",
+            ):
                 return False, f"campaign_info: unknown prop '{k}'"
-        for k in ("show_goal", "show_progress_bar", "show_donations_count"):
+        for k in (
+            "show_goal",
+            "show_progress_bar",
+            "show_donations_count",
+            "show_winner",
+        ):
             if k in props and not isinstance(props[k], bool):
                 return False, f"campaign_info.{k} must be boolean"
     elif block_type == "donate_button":
