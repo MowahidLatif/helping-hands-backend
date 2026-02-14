@@ -1,4 +1,5 @@
 import os
+from uuid import UUID
 from flask import Blueprint, jsonify, request, send_from_directory
 from app.utils.page_layout import BLOCK_TYPES, BLOCK_SCHEMA
 from app.utils.db import get_db_connection
@@ -7,6 +8,14 @@ from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 core = Blueprint("core", __name__)
 
 _STATIC = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "static")
+
+
+def _is_uuid(v: str) -> bool:
+    try:
+        UUID(v)
+        return True
+    except Exception:
+        return False
 
 
 @core.get("/donate/<org_subdomain>/<camp_slug>")
@@ -50,6 +59,46 @@ def campaign_public_no_subdomain(org_subdomain, camp_slug):
             WHERE org_id=%s AND slug=%s
             """,
             (org_id, camp_slug),
+        )
+        row = cur.fetchone()
+        if not row:
+            return jsonify({"error": "campaign not found"}), 404
+
+    resp = {
+        "id": str(row[0]),
+        "title": row[1],
+        "slug": row[2],
+        "goal": float(row[3]),
+        "total_raised": float(row[4]),
+    }
+    if row[5] is not None:
+        resp["giveaway_prize_cents"] = row[5]
+        resp["giveaway_prize"] = round(row[5] / 100.0, 2)
+    if row[6] is not None:
+        resp["page_layout"] = row[6]
+    return jsonify(resp), 200
+
+
+@core.get("/api/campaigns/<campaign_id>/public")
+def campaign_public_by_id(campaign_id):
+    """
+    Public campaign JSON by ID. For donate page when only campaign ID is available (e.g. from Preview).
+    No auth required.
+    """
+    if not _is_uuid(campaign_id):
+        return jsonify({"error": "invalid campaign_id"}), 400
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id, title, slug,
+                   COALESCE(goal, 0) AS goal,
+                   COALESCE(total_raised, 0) AS total_raised,
+                   giveaway_prize_cents,
+                   page_layout
+            FROM campaigns
+            WHERE id = %s
+            """,
+            (campaign_id,),
         )
         row = cur.fetchone()
         if not row:
