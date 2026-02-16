@@ -98,21 +98,96 @@ def insert_donation(data):
     return donation
 
 
-def select_donations_by_campaign(campaign_id):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT * FROM donations
+def select_donations_by_campaign(campaign_id: str) -> List[Dict[str, Any]]:
+    """Return all donations for a campaign as list of dicts, newest first."""
+    cols = [
+        "id",
+        "org_id",
+        "campaign_id",
+        "amount_cents",
+        "currency",
+        "donor_email",
+        "message",
+        "status",
+        "created_at",
+        "updated_at",
+    ]
+    sql = """
+        SELECT id, org_id, campaign_id, amount_cents, currency, donor_email,
+               message, status, created_at, updated_at
+        FROM donations
         WHERE campaign_id = %s
-        ORDER BY donated_at DESC;
-    """,
-        (campaign_id,),
-    )
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
-    return rows
+        ORDER BY created_at DESC
+    """
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (campaign_id,))
+        rows = cur.fetchall()
+        return [dict(zip(cols, row)) for row in rows]
+
+
+def list_donations_paginated(
+    campaign_id: str,
+    *,
+    page: int = 1,
+    per_page: int = 20,
+    sort: str = "created_at",
+    order: str = "desc",
+    search: str | None = None,
+) -> dict[str, Any]:
+    """
+    Return paginated donations for a campaign.
+    sort: one of created_at, amount_cents, donor_email, status
+    order: asc or desc
+    search: optional; filters by donor_email or message (ILIKE %search%)
+    Returns: { "items": [...], "total": N, "page": P, "per_page": PP }
+    """
+    allowed_sort = ("created_at", "amount_cents", "donor_email", "status")
+    sort = sort if sort in allowed_sort else "created_at"
+    order = order.lower() if order in ("asc", "desc") else "desc"
+    page = max(1, int(page))
+    per_page = max(1, min(100, int(per_page)))
+    offset = (page - 1) * per_page
+
+    cols = [
+        "id",
+        "campaign_id",
+        "amount_cents",
+        "currency",
+        "donor_email",
+        "message",
+        "status",
+        "created_at",
+        "updated_at",
+    ]
+    base_sql = """
+        SELECT id, campaign_id, amount_cents, currency, donor_email,
+               message, status, created_at, updated_at
+        FROM donations
+        WHERE campaign_id = %s
+    """
+    count_sql = "SELECT COUNT(*)::int FROM donations WHERE campaign_id = %s"
+    params: list[Any] = [campaign_id]
+    if search and (q := (search or "").strip()):
+        pattern = f"%{q}%"
+        base_sql += " AND (donor_email ILIKE %s OR message ILIKE %s)"
+        count_sql += " AND (donor_email ILIKE %s OR message ILIKE %s)"
+        params.extend([pattern, pattern])
+    count_params = params.copy()
+    base_sql += f" ORDER BY {sort} {order} LIMIT %s OFFSET %s"
+    params.extend([per_page, offset])
+
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(count_sql, count_params)
+        total = cur.fetchone()[0]
+        cur.execute(base_sql, params)
+        rows = cur.fetchall()
+        items = [dict(zip(cols, row)) for row in rows]
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+    }
 
 
 def get_donation_by_pi(pi_id: str) -> dict[str, Any] | None:

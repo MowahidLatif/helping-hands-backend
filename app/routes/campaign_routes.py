@@ -19,6 +19,7 @@ import json
 from app.utils.cache import r
 from app.models.donation import (
     count_and_last_succeeded,
+    list_donations_paginated,
     recent_succeeded_for_campaign,
     select_donations_by_campaign,
 )
@@ -274,6 +275,33 @@ def get_giveaway_logs(campaign_id):
     return jsonify(list_giveaway_logs(campaign_id, limit=limit)), 200
 
 
+@campaigns.get("/<campaign_id>/donations")
+@jwt_required()
+def list_campaign_donations(campaign_id):
+    if not _is_uuid(campaign_id):
+        return jsonify({"error": "invalid campaign_id"}), 400
+    camp = get_campaign(campaign_id)
+    if not camp:
+        return jsonify({"error": "not found"}), 404
+    role = get_user_role_in_org(get_jwt_identity(), camp["org_id"])
+    if role not in ("owner", "admin"):
+        return jsonify({"error": "forbidden"}), 403
+    page = request.args.get("page", 1, type=int)
+    per_page = request.args.get("per_page", 20, type=int)
+    sort = request.args.get("sort", "created_at")
+    order = request.args.get("order", "desc")
+    search = request.args.get("search", "").strip() or None
+    result = list_donations_paginated(
+        campaign_id,
+        page=page,
+        per_page=per_page,
+        sort=sort,
+        order=order,
+        search=search,
+    )
+    return jsonify(result), 200
+
+
 @campaigns.get("/<campaign_id>/donations/recent")
 def recent_donations(campaign_id):
     if not _is_uuid(campaign_id):
@@ -308,14 +336,17 @@ def export_donations_csv(campaign_id):
         ]
     )
     for row in rows:
+        created_at = row.get("created_at")
+        if hasattr(created_at, "isoformat"):
+            created_at = created_at.isoformat()
         w.writerow(
             [
-                row[0],
-                row[4] * 100 if row[4] else None,
-                "cad",
-                row[3],
-                "succeeded",
-                row[-1],
+                row.get("id"),
+                row.get("amount_cents"),
+                row.get("currency") or "usd",
+                row.get("donor_email"),
+                row.get("status"),
+                created_at,
             ]
         )
     out = buf.getvalue()
