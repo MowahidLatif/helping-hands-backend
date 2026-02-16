@@ -49,7 +49,7 @@ def list_org_members(org_id: str) -> List[Dict[str, Any]]:
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, (org_id,))
         return [
-            {"id": r[0], "email": r[1], "name": r[2], "role": r[3]}
+            {"id": str(r[0]), "email": r[1], "name": r[2], "role": r[3]}
             for r in cur.fetchall()
         ]
 

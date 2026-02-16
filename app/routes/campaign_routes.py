@@ -47,6 +47,15 @@ from app.models.campaign_update import (
     update_update,
     delete_update,
 )
+from app.models.campaign_task import (
+    list_campaign_tasks,
+    get_campaign_task,
+    create_campaign_task,
+    update_campaign_task,
+    delete_campaign_task,
+)
+from app.models.task_status import get_task_status
+from app.models.org_permissions import user_has_permission
 from app.tasks import enqueue_campaign_update_notifications
 import csv
 import io
@@ -73,13 +82,17 @@ def list_for_org():
 
 
 @campaigns.post("/")
-@require_org_role("admin", "owner")
+@require_org_role()
 def create():
     body = request.get_json(force=True, silent=True) or {}
     title = (body.get("title") or "").strip()
     if not title:
         return jsonify({"error": "title required"}), 400
     org_id = body.get("org_id") or get_jwt().get("org_id")
+    user_id = get_jwt_identity()
+    role = get_user_role_in_org(user_id, org_id)
+    if not user_has_permission(user_id, org_id, "campaign:create", role):
+        return jsonify({"error": "forbidden: campaign:create required"}), 403
     goal = float(body.get("goal") or 0)
     status = body.get("status") or "draft"
     custom_domain = (body.get("custom_domain") or "").strip() or None
@@ -116,9 +129,12 @@ def patch(campaign_id):
     if not camp:
         return jsonify({"error": "not found"}), 404
 
-    role = get_user_role_in_org(get_jwt_identity(), camp["org_id"])
-    if role not in ("admin", "owner"):
-        return jsonify({"error": "forbidden"}), 403
+    user_id = get_jwt_identity()
+    role = get_user_role_in_org(user_id, camp["org_id"])
+    if not role:
+        return jsonify({"error": "not a member"}), 403
+    if not user_has_permission(user_id, camp["org_id"], "campaign:edit", role):
+        return jsonify({"error": "forbidden: campaign:edit required"}), 403
 
     body = request.get_json(silent=True) or {}
     updates = {}
@@ -168,9 +184,12 @@ def delete(campaign_id):
     if not camp:
         return jsonify({"error": "not found"}), 404
 
-    role = get_user_role_in_org(get_jwt_identity(), camp["org_id"])
-    if role not in ("admin", "owner"):
-        return jsonify({"error": "forbidden"}), 403
+    user_id = get_jwt_identity()
+    role = get_user_role_in_org(user_id, camp["org_id"])
+    if not role:
+        return jsonify({"error": "not a member"}), 403
+    if not user_has_permission(user_id, camp["org_id"], "campaign:delete", role):
+        return jsonify({"error": "forbidden: campaign:delete required"}), 403
 
     ok = delete_campaign(campaign_id)
     return ("", 204) if ok else (jsonify({"error": "not found"}), 404)
@@ -598,3 +617,141 @@ def delete_update_route(campaign_id, update_id):
         return jsonify({"error": "forbidden"}), 403
     ok = delete_update(update_id, get_jwt_identity())
     return ("", 204) if ok else (jsonify({"error": "not found"}), 404)
+
+
+# ----- Campaign tasks (campaign-specific tasks with assignee and status) -----
+
+
+@campaigns.get("/<campaign_id>/tasks")
+@jwt_required()
+def list_campaign_tasks_route(campaign_id):
+    if not _is_uuid(campaign_id):
+        return jsonify({"error": "invalid campaign_id"}), 400
+    camp = get_campaign(campaign_id)
+    if not camp:
+        return jsonify({"error": "not found"}), 404
+    role = get_user_role_in_org(get_jwt_identity(), camp["org_id"])
+    if not role:
+        return jsonify({"error": "not a member"}), 403
+    tasks = list_campaign_tasks(campaign_id)
+    return jsonify(tasks), 200
+
+
+@campaigns.post("/<campaign_id>/tasks")
+@jwt_required()
+def create_campaign_task_route(campaign_id):
+    if not _is_uuid(campaign_id):
+        return jsonify({"error": "invalid campaign_id"}), 400
+    camp = get_campaign(campaign_id)
+    if not camp:
+        return jsonify({"error": "not found"}), 404
+    org_id = camp["org_id"]
+    user_id = get_jwt_identity()
+    role = get_user_role_in_org(user_id, org_id)
+    if not role:
+        return jsonify({"error": "not a member"}), 403
+    if not user_has_permission(user_id, org_id, "tasks:create", role):
+        return jsonify({"error": "forbidden: tasks:create required"}), 403
+    data = request.get_json(silent=True) or {}
+    title = (data.get("title") or "").strip()
+    if not title:
+        return jsonify({"error": "title required"}), 400
+    description = (data.get("description") or "").strip() or None
+    assignee_user_id = data.get("assignee_user_id") or None
+    status_id = data.get("status_id") or None
+    if assignee_user_id and not get_user_role_in_org(assignee_user_id, org_id):
+        return jsonify({"error": "assignee must be org member"}), 400
+    if status_id and not get_task_status(status_id, org_id):
+        return jsonify({"error": "invalid status_id"}), 400
+    task = create_campaign_task(
+        campaign_id,
+        title,
+        description=description,
+        assignee_user_id=assignee_user_id,
+        status_id=status_id,
+    )
+    return jsonify(task), 201
+
+
+@campaigns.patch("/<campaign_id>/tasks/<task_id>")
+@jwt_required()
+def patch_campaign_task_route(campaign_id, task_id):
+    if not _is_uuid(campaign_id) or not _is_uuid(task_id):
+        return jsonify({"error": "invalid id"}), 400
+    camp = get_campaign(campaign_id)
+    if not camp:
+        return jsonify({"error": "not found"}), 404
+    task = get_campaign_task(task_id, campaign_id)
+    if not task:
+        return jsonify({"error": "not found"}), 404
+    org_id = camp["org_id"]
+    user_id = get_jwt_identity()
+    role = get_user_role_in_org(user_id, org_id)
+    if not role:
+        return jsonify({"error": "not a member"}), 403
+    data = request.get_json(silent=True) or {}
+    only_status = set(data.keys()) <= {"status_id"} and "status_id" in data
+    if only_status:
+        if role in ("owner", "admin") or (
+            task.get("assignee_user_id") and str(task["assignee_user_id"]) == user_id
+        ):
+            status_id = data.get("status_id")
+            if status_id and not get_task_status(status_id, org_id):
+                return jsonify({"error": "invalid status_id"}), 400
+            updated = update_campaign_task(task_id, campaign_id, status_id=status_id)
+            return jsonify(updated), 200
+        return (
+            jsonify({"error": "forbidden: only assignee or admin can update status"}),
+            403,
+        )
+    if not user_has_permission(user_id, org_id, "tasks:edit_any", role):
+        return jsonify({"error": "forbidden: tasks:edit_any required"}), 403
+    title = data.get("title")
+    if title is not None:
+        title = (title or "").strip()
+    description = data.get("description")
+    if description is not None:
+        description = (description or "").strip() or None
+    assignee_user_id = data.get("assignee_user_id")
+    if (
+        assignee_user_id is not None
+        and assignee_user_id
+        and not get_user_role_in_org(assignee_user_id, org_id)
+    ):
+        return jsonify({"error": "assignee must be org member"}), 400
+    status_id = data.get("status_id")
+    if status_id is not None and status_id and not get_task_status(status_id, org_id):
+        return jsonify({"error": "invalid status_id"}), 400
+    updated = update_campaign_task(
+        task_id,
+        campaign_id,
+        title=title,
+        description=description,
+        assignee_user_id=assignee_user_id,
+        status_id=status_id,
+    )
+    if not updated:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(updated), 200
+
+
+@campaigns.delete("/<campaign_id>/tasks/<task_id>")
+@jwt_required()
+def delete_campaign_task_route(campaign_id, task_id):
+    if not _is_uuid(campaign_id) or not _is_uuid(task_id):
+        return jsonify({"error": "invalid id"}), 400
+    camp = get_campaign(campaign_id)
+    if not camp:
+        return jsonify({"error": "not found"}), 404
+    task = get_campaign_task(task_id, campaign_id)
+    if not task:
+        return jsonify({"error": "not found"}), 404
+    user_id = get_jwt_identity()
+    role = get_user_role_in_org(user_id, camp["org_id"])
+    if not role:
+        return jsonify({"error": "not a member"}), 403
+    if not user_has_permission(user_id, camp["org_id"], "tasks:edit_any", role):
+        return jsonify({"error": "forbidden: tasks:edit_any required"}), 403
+    if not delete_campaign_task(task_id, campaign_id):
+        return jsonify({"error": "not found"}), 404
+    return "", 204
