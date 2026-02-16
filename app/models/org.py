@@ -20,7 +20,7 @@ def create_organization(name: str, subdomain: str | None = None):
 
 
 def get_organization(org_id: str) -> dict[str, Any] | None:
-    sql = "SELECT id, name, created_at, updated_at FROM organizations WHERE id = %s"
+    sql = "SELECT id, name, subdomain, created_at, updated_at FROM organizations WHERE id = %s"
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, (org_id,))
         row = cur.fetchone()
@@ -29,8 +29,9 @@ def get_organization(org_id: str) -> dict[str, Any] | None:
         return {
             "id": row[0],
             "name": row[1],
-            "created_at": row[2],
-            "updated_at": row[3],
+            "subdomain": row[2],
+            "created_at": row[3],
+            "updated_at": row[4],
         }
 
 

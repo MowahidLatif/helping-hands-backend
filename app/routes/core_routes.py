@@ -5,6 +5,7 @@ from app.utils.page_layout import BLOCK_TYPES, BLOCK_SCHEMA
 from app.utils.db import get_db_connection
 from app.models.campaign import get_latest_winner_public
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
+from app.models.user import get_user_profile_by_id, update_user_profile
 
 core = Blueprint("core", __name__)
 
@@ -170,3 +171,32 @@ def me():
             ),
         }
     )
+
+
+@core.get("/api/me/profile")
+@jwt_required()
+def me_profile_get():
+    user_id = get_jwt_identity()
+    profile = get_user_profile_by_id(user_id)
+    if not profile:
+        return jsonify({"error": "User not found"}), 404
+    return jsonify(profile), 200
+
+
+@core.patch("/api/me/profile")
+@jwt_required()
+def me_profile_patch():
+    user_id = get_jwt_identity()
+    data = request.get_json(silent=True) or {}
+    name = data.get("name")
+    email = data.get("email")
+    if name is None and email is None:
+        profile = get_user_profile_by_id(user_id)
+        if not profile:
+            return jsonify({"error": "User not found"}), 404
+        return jsonify(profile), 200
+    try:
+        profile = update_user_profile(user_id, name=name, email=email)
+        return jsonify(profile), 200
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400

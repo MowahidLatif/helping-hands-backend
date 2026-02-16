@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, create_access_token
-from app.services.auth_service import login_user, signup_user
+from app.services.auth_service import login_user, signup_user, change_password
 from app.utils.rate_limit import rate_limit_decorator
 
 auth_bp = Blueprint("auth", __name__)
@@ -36,3 +36,17 @@ def signup():
     data = request.json
     response = signup_user(data)
     return jsonify(response), (201 if "id" in response else 400)
+
+
+@auth_bp.post("/change-password")
+@jwt_required()
+def change_password_route():
+    data = request.get_json(force=True, silent=True) or {}
+    current = (data.get("current_password") or "").strip()
+    new_pw = (data.get("new_password") or "").strip()
+    if not current or not new_pw:
+        return jsonify({"error": "current_password and new_password required"}), 400
+    result = change_password(get_jwt_identity(), current, new_pw)
+    if "error" in result:
+        return jsonify({"error": result["error"]}), 400
+    return jsonify(result), 200

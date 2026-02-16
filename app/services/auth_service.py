@@ -1,4 +1,9 @@
-from app.models.user import get_user_by_email, create_user
+from app.models.user import (
+    get_user_by_email,
+    get_user_by_id,
+    create_user,
+    update_password as model_update_password,
+)
 import re
 import bcrypt
 from typing import Dict, Any
@@ -97,3 +102,19 @@ def login_user(data: dict) -> dict:
         "name": user.get("name"),
         **tokens,
     }
+
+
+def change_password(user_id: str, current_password: str, new_password: str) -> dict:
+    """
+    Verify current password, then set new password (hashed).
+    Returns {"success": True} or {"error": "..."}.
+    """
+    if not new_password or len(new_password) < 8:
+        return {"error": "Password must be at least 8 characters"}
+    user = get_user_by_id(user_id)
+    if not user:
+        return {"error": "User not found"}
+    if not _verify_password(current_password, user["password_hash"]):
+        return {"error": "Current password is incorrect"}
+    model_update_password(user_id, _hash_password(new_password))
+    return {"success": True}
