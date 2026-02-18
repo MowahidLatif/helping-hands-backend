@@ -23,12 +23,14 @@ def _clean_old(ts_list: list[float], window: int) -> None:
         ts_list.pop(0)
 
 
-def is_rate_limited(key: str, limit: int) -> bool:
-    """Return True if the key has exceeded the limit within the window."""
+def is_rate_limited(key: str, limit: int, window_seconds: int | None = None) -> bool:
+    """Return True if the key has exceeded the limit within the window.
+    Uses default 60s window unless window_seconds is set (e.g. 3600 for per-hour)."""
     if limit <= 0:
         return False
+    window = window_seconds if window_seconds is not None else _window
     with _lock:
-        _clean_old(_counts[key], _window)
+        _clean_old(_counts[key], window)
         if len(_counts[key]) >= limit:
             return True
         _counts[key].append(time.time())

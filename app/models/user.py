@@ -3,18 +3,34 @@ from typing import Optional, Dict, Any
 
 
 def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
-    sql = "SELECT id, email, password_hash, name FROM users WHERE email = %s"
+    """Return user by email; excludes anonymized users (cannot log in). Includes totp_enabled for login flow."""
+    sql = """
+        SELECT id, email, password_hash, name, COALESCE(totp_enabled, false)
+        FROM users
+        WHERE email = %s AND anonymized_at IS NULL
+    """
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, (email,))
         row = cur.fetchone()
         if not row:
             return None
-        return {"id": row[0], "email": row[1], "password_hash": row[2], "name": row[3]}
+        return {
+            "id": row[0],
+            "email": row[1],
+            "password_hash": row[2],
+            "name": row[3],
+            "totp_enabled": bool(row[4]) if len(row) > 4 else False,
+        }
 
 
 def get_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
-    """Return user row (id, email, password_hash, name) for auth schema. Used for password verify."""
-    sql = "SELECT id, email, password_hash, name FROM users WHERE id = %s"
+    """Return user row (id, email, password_hash, name, totp_enabled) for auth schema.
+    Excludes anonymized users."""
+    sql = """
+        SELECT id, email, password_hash, name, COALESCE(totp_enabled, false)
+        FROM users
+        WHERE id = %s AND anonymized_at IS NULL
+    """
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, (user_id,))
         row = cur.fetchone()
@@ -25,6 +41,7 @@ def get_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
             "email": row[1],
             "password_hash": row[2],
             "name": row[3],
+            "totp_enabled": bool(row[4]) if len(row) > 4 else False,
         }
 
 
@@ -120,8 +137,8 @@ def get_user(user_id):
 
 
 def get_user_profile_by_id(user_id: str) -> Optional[Dict[str, Any]]:
-    """Return public profile (id, email, name) for settings. Uses auth schema (name, email)."""
-    sql = "SELECT id, email, name FROM users WHERE id = %s"
+    """Return public profile (id, email, name) for settings. Excludes anonymized users."""
+    sql = "SELECT id, email, name FROM users WHERE id = %s AND anonymized_at IS NULL"
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, (user_id,))
         row = cur.fetchone()
@@ -167,3 +184,61 @@ def update_user_profile(
         row = cur.fetchone()
         conn.commit()
         return {"id": str(row[0]), "email": row[1] or "", "name": row[2] or ""}
+
+
+def anonymize_user(user_id: str, unusable_password_hash: str) -> None:
+    """
+    Anonymize user: set email to deleted_<id>@anonymized.local, name=NULL,
+    password_hash=unusable. Keeps row and FKs for recovery. Caller must pass
+    a bcrypt hash that will never match (e.g. from auth_service).
+    """
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE users
+            SET email = %s, name = NULL, password_hash = %s, anonymized_at = now(),
+                updated_at = now(), totp_secret = NULL, totp_enabled = false
+            WHERE id = %s
+            """,
+            (f"deleted_{user_id}@anonymized.local", unusable_password_hash, user_id),
+        )
+        conn.commit()
+
+
+def get_user_totp_secret(user_id: str) -> Optional[str]:
+    """Return TOTP secret for user (for server-side verify/disable)."""
+    sql = "SELECT totp_secret FROM users WHERE id = %s AND anonymized_at IS NULL"
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (user_id,))
+        row = cur.fetchone()
+        return row[0] if row and row[0] else None
+
+
+def set_totp_secret(user_id: str, secret: str) -> None:
+    """Store TOTP secret and leave totp_enabled false until verified."""
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE users SET totp_secret = %s, totp_enabled = false, updated_at = now() WHERE id = %s",
+            (secret, user_id),
+        )
+        conn.commit()
+
+
+def set_totp_enabled(user_id: str) -> None:
+    """Set totp_enabled = true after successful verify."""
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE users SET totp_enabled = true, updated_at = now() WHERE id = %s",
+            (user_id,),
+        )
+        conn.commit()
+
+
+def clear_totp(user_id: str) -> None:
+    """Clear TOTP secret and disable 2FA."""
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE users SET totp_secret = NULL, totp_enabled = false, updated_at = now() WHERE id = %s",
+            (user_id,),
+        )
+        conn.commit()

@@ -1,11 +1,22 @@
+from datetime import timedelta
+
 from app.models.user import (
     get_user_by_email,
     get_user_by_id,
     create_user,
     update_password as model_update_password,
+    anonymize_user as model_anonymize_user,
+    get_user_totp_secret,
+    set_totp_secret as model_set_totp_secret,
+    set_totp_enabled as model_set_totp_enabled,
+    clear_totp as model_clear_totp,
 )
 import re
 import bcrypt
+import pyotp
+import qrcode
+import io
+import base64
 from typing import Dict, Any
 from flask_jwt_extended import create_access_token, create_refresh_token
 from app.models.org import create_organization
@@ -90,14 +101,24 @@ def login_user(data: dict) -> dict:
     if not user or not _verify_password(password, user["password_hash"]):
         return {"error": "Invalid credentials"}
 
-    org_role = get_primary_org_role(user["id"])
+    totp_enabled = user.get("totp_enabled", False)
+    user_id = str(user["id"])
+    if totp_enabled:
+        temp_token = create_access_token(
+            identity=user_id,
+            additional_claims={"pre_2fa": True},
+            expires_delta=timedelta(minutes=5),
+        )
+        return {"requires_2fa": True, "temp_token": temp_token}
+
+    org_role = get_primary_org_role(user_id)
     claims = {}
     if org_role:
         claims = {"org_id": org_role[0], "role": org_role[1]}
 
-    tokens = _make_tokens(user["id"], claims)
+    tokens = _make_tokens(user_id, claims)
     return {
-        "id": user["id"],
+        "id": user_id,
         "email": user["email"],
         "name": user.get("name"),
         **tokens,
@@ -118,3 +139,117 @@ def change_password(user_id: str, current_password: str, new_password: str) -> d
         return {"error": "Current password is incorrect"}
     model_update_password(user_id, _hash_password(new_password))
     return {"success": True}
+
+
+def _unusable_password_hash() -> str:
+    """Return a bcrypt hash that will never match any login (for anonymized users)."""
+    return bcrypt.hashpw(b"anonymized", bcrypt.gensalt()).decode("utf-8")
+
+
+def delete_account(user_id: str, password: str, totp_code: str | None = None) -> dict:
+    """
+    Verify password (and TOTP if enabled), then anonymize user. No hard delete.
+    Returns {"success": True} or {"error": "..."}.
+    """
+    user = get_user_by_id(user_id)
+    if not user:
+        return {"error": "User not found"}
+    if not _verify_password(password, user["password_hash"]):
+        return {"error": "Password is incorrect"}
+    if user.get("totp_enabled"):
+        if not totp_code or len(totp_code) != 6:
+            return {"error": "2FA code required"}
+        secret = get_user_totp_secret(user_id)
+        if not secret or not pyotp.TOTP(secret).verify(totp_code, valid_window=1):
+            return {"error": "Invalid 2FA code"}
+    model_anonymize_user(user_id, _unusable_password_hash())
+    return {"success": True}
+
+
+def setup_2fa(user_id: str) -> dict:
+    """Generate TOTP secret, store it (totp_enabled=false), return secret, uri, qr_data_url."""
+    user = get_user_by_id(user_id)
+    if not user:
+        return {"error": "User not found"}
+    secret = pyotp.random_base32()
+    totp = pyotp.TOTP(secret)
+    provisioning_uri = totp.provisioning_uri(
+        name=user.get("email") or str(user_id),
+        issuer_name="Donations",
+    )
+    model_set_totp_secret(user_id, secret)
+    qr = qrcode.QRCode(box_size=3, border=2)
+    qr.add_data(provisioning_uri)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    qr_data_url = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+    return {
+        "secret": secret,
+        "provisioning_uri": provisioning_uri,
+        "qr_data_url": qr_data_url,
+    }
+
+
+def verify_2fa(user_id: str, code: str) -> dict:
+    """Verify TOTP code and enable 2FA."""
+    if not code or len(code) != 6:
+        return {"error": "Invalid code"}
+    secret = get_user_totp_secret(user_id)
+    if not secret:
+        return {"error": "2FA not set up"}
+    if not pyotp.TOTP(secret).verify(code, valid_window=1):
+        return {"error": "Invalid code"}
+    model_set_totp_enabled(user_id)
+    return {"success": True}
+
+
+def disable_2fa(user_id: str, password: str, code: str) -> dict:
+    """Verify password and TOTP code, then disable 2FA."""
+    user = get_user_by_id(user_id)
+    if not user:
+        return {"error": "User not found"}
+    if not _verify_password(password, user["password_hash"]):
+        return {"error": "Password is incorrect"}
+    if not code or len(code) != 6:
+        return {"error": "2FA code required"}
+    secret = get_user_totp_secret(user_id)
+    if not secret or not pyotp.TOTP(secret).verify(code, valid_window=1):
+        return {"error": "Invalid 2FA code"}
+    model_clear_totp(user_id)
+    return {"success": True}
+
+
+def confirm_2fa_login(temp_token: str, code: str) -> dict:
+    """
+    Exchange temp_token (pre_2fa JWT) + TOTP code for real access and refresh tokens.
+    Caller must decode temp_token and pass user_id; we verify TOTP and issue tokens.
+    """
+    if not code or len(code) != 6:
+        return {"error": "Invalid code"}
+    # Decode temp_token to get user_id (pre_2fa JWT from login when 2FA enabled)
+    from flask_jwt_extended import decode_token
+
+    try:
+        decoded = decode_token(temp_token)
+        if not decoded.get("pre_2fa") or not decoded.get("sub"):
+            return {"error": "Invalid token"}
+        user_id = str(decoded["sub"])
+    except Exception:
+        return {"error": "Invalid or expired token"}
+    secret = get_user_totp_secret(user_id)
+    if not secret or not pyotp.TOTP(secret).verify(code, valid_window=1):
+        return {"error": "Invalid code"}
+    org_role = get_primary_org_role(user_id)
+    claims = {}
+    if org_role:
+        claims = {"org_id": org_role[0], "role": org_role[1]}
+    tokens = _make_tokens(user_id, claims)
+    user = get_user_by_id(user_id)
+    return {
+        "id": user["id"],
+        "email": user["email"],
+        "name": user.get("name"),
+        **tokens,
+    }

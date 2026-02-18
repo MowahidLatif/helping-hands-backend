@@ -17,6 +17,7 @@ from app.routes import (
     webhooks_bp,
     public,
     admin_bp,
+    contact_bp,
 )
 from app.realtime import init_socketio
 
@@ -105,6 +106,7 @@ def create_app():
     app.register_blueprint(webhooks_bp)
     app.register_blueprint(public)
     app.register_blueprint(admin_bp)
+    app.register_blueprint(contact_bp)
 
     print("\n=== URL MAP ===")
     for rule in app.url_map.iter_rules():
