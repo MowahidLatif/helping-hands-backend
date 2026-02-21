@@ -160,8 +160,8 @@ def delete_media(media_id):
     if item.get("s3_key"):
         try:
             delete_object(item["s3_key"])
-        except Exception:
-            pass  # Don't block DB deletion if S3 deletion fails
+        except Exception as e:
+            print(f"[error] s3 delete {item['s3_key']}: {e}", flush=True)
 
     delete_media_item(media_id)
     return "", 204

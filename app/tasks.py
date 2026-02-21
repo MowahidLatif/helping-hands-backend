@@ -91,5 +91,5 @@ def send_campaign_update_notifications(campaign_id: str, update_id: str) -> None
                 from_email=from_email,
                 from_name=from_name,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[error] send campaign update email to {to_addr}: {e}", flush=True)

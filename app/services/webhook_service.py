@@ -138,8 +138,8 @@ def process_stripe_event(
             totals = recompute_total_raised(cid)
             try:
                 r().delete(f"campaign:{cid}:progress:v1")
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[error] redis cache bust campaign:{cid}: {e}", flush=True)
             if new_status == "succeeded":
                 try:
                     record_platform_fee_if_goal_reached(cid)
@@ -159,8 +159,11 @@ def process_stripe_event(
                 }
                 try:
                     socketio.emit("donation", payload_out, to=f"campaign:{cid}")
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(
+                        f"[error] socketio emit donation campaign:{cid}: {e}",
+                        flush=True,
+                    )
 
         return 200, {"ok": True}
 

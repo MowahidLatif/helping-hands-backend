@@ -65,6 +65,17 @@ def set_user_role(org_id: str, user_id: str, role: str) -> bool:
 def remove_user_from_org(org_id: str, user_id: str) -> bool:
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
+            """
+            UPDATE campaign_tasks
+            SET assignee_user_id = NULL
+            WHERE assignee_user_id = %s
+              AND campaign_id IN (
+                  SELECT id FROM campaigns WHERE org_id = %s
+              )
+            """,
+            (user_id, org_id),
+        )
+        cur.execute(
             "DELETE FROM org_users WHERE org_id = %s AND user_id = %s",
             (org_id, user_id),
         )

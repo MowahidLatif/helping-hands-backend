@@ -145,8 +145,8 @@ def draw_winner_for_campaign(
             send_winner_email(
                 org_id, camp["title"], winner_email, prize_cents=prize_cents
             )
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[error] send_winner_email: {e}", flush=True)
 
     payload = {
         "winner": _serialize_donation_row(full),

@@ -617,8 +617,8 @@ def create_update_route(campaign_id):
     upd = create_update(campaign_id, get_jwt_identity(), title, body)
     try:
         enqueue_campaign_update_notifications(campaign_id, upd["id"])
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[error] enqueue_campaign_update_notifications: {e}", flush=True)
     return jsonify(upd), 201
 
 
