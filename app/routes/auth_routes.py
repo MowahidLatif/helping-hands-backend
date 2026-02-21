@@ -14,6 +14,8 @@ from app.services.auth_service import (
     verify_2fa,
     disable_2fa,
     confirm_2fa_login,
+    request_password_reset,
+    do_password_reset,
 )
 from app.utils.rate_limit import rate_limit_decorator
 
@@ -134,6 +136,33 @@ def twofa_disable():
     if not password or not code:
         return jsonify({"error": "password and code required"}), 400
     result = disable_2fa(get_jwt_identity(), password, code)
+    if "error" in result:
+        return jsonify({"error": result["error"]}), 400
+    return jsonify(result), 200
+
+
+@auth_bp.post("/forgot-password")
+@rate_limit_decorator(_auth_limit, "auth")
+def forgot_password():
+    """Public. Always returns 200 to prevent user enumeration."""
+    data = request.get_json(force=True, silent=True) or {}
+    email = (data.get("email") or "").strip()
+    if not email:
+        return jsonify({"error": "email is required"}), 400
+    result = request_password_reset(email)
+    return jsonify(result), 200
+
+
+@auth_bp.post("/reset-password")
+@rate_limit_decorator(_auth_limit, "auth")
+def reset_password():
+    """Public. Validate token and set new password."""
+    data = request.get_json(force=True, silent=True) or {}
+    token = (data.get("token") or "").strip()
+    new_password = (data.get("new_password") or "").strip()
+    if not token or not new_password:
+        return jsonify({"error": "token and new_password are required"}), 400
+    result = do_password_reset(token, new_password)
     if "error" in result:
         return jsonify({"error": result["error"]}), 400
     return jsonify(result), 200

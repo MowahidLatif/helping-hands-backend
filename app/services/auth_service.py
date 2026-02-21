@@ -1,3 +1,4 @@
+import os
 from datetime import timedelta
 
 from app.models.user import (
@@ -218,6 +219,58 @@ def disable_2fa(user_id: str, password: str, code: str) -> dict:
     if not secret or not pyotp.TOTP(secret).verify(code, valid_window=1):
         return {"error": "Invalid 2FA code"}
     model_clear_totp(user_id)
+    return {"success": True}
+
+
+def request_password_reset(email: str) -> dict:
+    """
+    Send a password-reset email if the address is registered.
+    Always returns the same generic message to avoid user enumeration.
+    """
+    from app.models.password_reset import create_reset_token
+    from app.utils.email_sender import send_email
+
+    email = _normalize_email(email)
+    user = get_user_by_email(email)
+    if user:
+        raw_token = create_reset_token(str(user["id"]))
+        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
+        reset_link = f"{frontend_url}/reset-credentials?token={raw_token}"
+        body_text = (
+            f"Hi,\n\nYou requested a password reset.\n\n"
+            f"Click the link below to reset your password (valid for 1 hour):\n{reset_link}\n\n"
+            f"If you did not request this, you can safely ignore this email."
+        )
+        body_html = (
+            f"<p>Hi,</p>"
+            f"<p>You requested a password reset.</p>"
+            f"<p><a href='{reset_link}'>Reset my password</a></p>"
+            f"<p>This link is valid for 1 hour. If you did not request this, ignore this email.</p>"
+        )
+        send_email(
+            to_email=email,
+            subject="Reset your password",
+            body_text=body_text,
+            body_html=body_html,
+        )
+    return {"message": "If that email is registered, a reset link has been sent."}
+
+
+def do_password_reset(raw_token: str, new_password: str) -> dict:
+    """
+    Validate the reset token and set the new password.
+    Returns {"success": True} or {"error": "..."}.
+    """
+    from app.models.password_reset import get_valid_token, mark_token_used
+
+    if not new_password or len(new_password) < 8:
+        return {"error": "Password must be at least 8 characters"}
+    token_row = get_valid_token(raw_token)
+    if not token_row:
+        return {"error": "Invalid or expired reset token"}
+    user_id = str(token_row["user_id"])
+    model_update_password(user_id, _hash_password(new_password))
+    mark_token_used(str(token_row["id"]))
     return {"success": True}
 
 
