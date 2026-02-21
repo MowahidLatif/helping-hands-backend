@@ -17,6 +17,7 @@ BLOCK_TYPES = frozenset(
         "text",
         "embed",
         "footer",
+        "progress_tube",
     }
 )
 
@@ -62,6 +63,12 @@ BLOCK_SCHEMA = {
     },
     "footer": {
         "props": {"text": "string", "show_org_name": "boolean"},
+    },
+    "progress_tube": {
+        "props": {
+            "label": "string",
+            "show_percent": "boolean",
+        },
     },
 }
 
@@ -179,6 +186,16 @@ def _valid_props_for_type(block_type: str, props: Any) -> tuple[bool, str | None
                 return False, "footer.text must be string max 2000"
         if "show_org_name" in props and not isinstance(props["show_org_name"], bool):
             return False, "footer.show_org_name must be boolean"
+    elif block_type == "progress_tube":
+        for k in props:
+            if k not in ("label", "show_percent"):
+                return False, f"progress_tube: unknown prop '{k}'"
+        if "label" in props and (
+            not isinstance(props["label"], str) or len(props["label"]) > 200
+        ):
+            return False, "progress_tube.label must be string max 200"
+        if "show_percent" in props and not isinstance(props["show_percent"], bool):
+            return False, "progress_tube.show_percent must be boolean"
     return True, None
 
 
