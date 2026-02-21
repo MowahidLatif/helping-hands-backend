@@ -1,8 +1,14 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.models.campaign import get_campaign
-from app.models.media import create_campaign_media
-from app.utils.s3_helpers import make_key, presign_put, public_url, upload_object
+from app.models.media import create_campaign_media, get_media_item, delete_media_item
+from app.utils.s3_helpers import (
+    make_key,
+    presign_put,
+    public_url,
+    upload_object,
+    delete_object,
+)
 from app.utils.embed import validate_embed_url, embed_url_to_iframe_src
 from app.utils.media_validators import (
     validate_content_type,
@@ -135,6 +141,30 @@ def upload():
         sort=sort,
     )
     return jsonify(row), 201
+
+
+@media_bp.delete("/api/media/<media_id>")
+@jwt_required()
+def delete_media(media_id):
+    """Delete a campaign media item. Removes from DB and S3 (if applicable)."""
+    item = get_media_item(media_id)
+    if not item:
+        return jsonify({"error": "not found"}), 404
+
+    from app.models.org_user import get_user_role_in_org
+
+    role = get_user_role_in_org(get_jwt_identity(), item["org_id"])
+    if role not in ("admin", "owner"):
+        return jsonify({"error": "forbidden"}), 403
+
+    if item.get("s3_key"):
+        try:
+            delete_object(item["s3_key"])
+        except Exception:
+            pass  # Don't block DB deletion if S3 deletion fails
+
+    delete_media_item(media_id)
+    return "", 204
 
 
 @media_bp.post("/api/media")

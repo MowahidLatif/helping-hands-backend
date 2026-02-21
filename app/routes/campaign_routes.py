@@ -371,7 +371,14 @@ def list_stripe_events(campaign_id):
 
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT event_id, type, created_at FROM stripe_events ORDER BY created_at DESC LIMIT 50"
+            """
+            SELECT event_id, type, created_at
+            FROM stripe_events
+            WHERE raw->'data'->'object'->'metadata'->>'campaign_id' = %s
+            ORDER BY created_at DESC
+            LIMIT 50
+            """,
+            (campaign_id,),
         )
         rows = cur.fetchall()
         return (

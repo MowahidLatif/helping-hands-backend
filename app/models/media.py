@@ -80,6 +80,31 @@ def list_media_for_campaign(campaign_id: str) -> list[dict[str, Any]]:
         return [dict(zip(cols, r)) for r in rows]
 
 
+def get_media_item(media_id: str) -> dict | None:
+    sql = """
+        SELECT id, org_id, campaign_id, type, s3_key
+        FROM campaign_media
+        WHERE id = %s
+    """
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (media_id,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        return dict(zip(["id", "org_id", "campaign_id", "type", "s3_key"], row))
+
+
+def delete_media_item(media_id: str) -> bool:
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "DELETE FROM campaign_media WHERE id = %s RETURNING id",
+            (media_id,),
+        )
+        row = cur.fetchone()
+        conn.commit()
+        return row is not None
+
+
 def insert_media(campaign_id, data):
     conn = get_db_connection()
     cur = conn.cursor()

@@ -62,6 +62,12 @@ def upload_object(key: str, body: bytes, content_type: str) -> None:
     )
 
 
+def delete_object(key: str) -> None:
+    """Delete an object from S3/MinIO by key."""
+    s3 = _client()
+    s3.delete_object(Bucket=S3_BUCKET, Key=key)
+
+
 def public_url(key: str) -> str:
     if USE_PATH:
         return f"{S3_ENDPOINT.rstrip('/')}/{S3_BUCKET}/{key}"

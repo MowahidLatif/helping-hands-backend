@@ -56,13 +56,6 @@ def refresh():
     return jsonify({"access_token": new_access}), 200
 
 
-@auth_bp.route("/signup", methods=["POST"])
-def signup():
-    data = request.json
-    response = signup_user(data)
-    return jsonify(response), (201 if "id" in response else 400)
-
-
 @auth_bp.post("/change-password")
 @jwt_required()
 def change_password_route():
