@@ -9,7 +9,6 @@ from flask_cors import CORS
 from app.routes import (
     auth_bp,
     core,
-    user,
     orgs,
     campaigns,
     media_bp,
@@ -97,7 +96,6 @@ def create_app():
         return {"ok": True, "server_name": app.config.get("SERVER_NAME")}, 200
 
     app.register_blueprint(core)
-    app.register_blueprint(user, url_prefix="/api/users")
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
     app.register_blueprint(orgs)
     app.register_blueprint(campaigns, url_prefix="/api/campaigns")
