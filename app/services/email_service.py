@@ -48,6 +48,8 @@ def ensure_receipt_for_donation(donation_id: str) -> None:
     org_settings = get_email_settings(d["org_id"])
     from_email = (org_settings or {}).get("from_email")
     from_name = (org_settings or {}).get("from_name")
+    reply_to = (org_settings or {}).get("reply_to")
+    bcc_to = (org_settings or {}).get("bcc_to")
 
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -104,6 +106,8 @@ def ensure_receipt_for_donation(donation_id: str) -> None:
         body_html=body_html,
         from_email=from_email,
         from_name=from_name,
+        reply_to=reply_to,
+        bcc=bcc_to,
     )
     with get_db_connection() as conn, conn.cursor() as cur:
         if result and msg_id_or_err:
@@ -146,6 +150,8 @@ def send_winner_email(
     org_settings = get_email_settings(org_id)
     from_email = (org_settings or {}).get("from_email")
     from_name = (org_settings or {}).get("from_name")
+    reply_to = (org_settings or {}).get("reply_to")
+    bcc_to = (org_settings or {}).get("bcc_to")
     if DEV_EMAIL_LOG_ONLY:
         print(f"[email][dev] winner to={winner_email} subj={content['subject']}")
         return None
@@ -156,5 +162,7 @@ def send_winner_email(
         body_html=content["body_html"],
         from_email=from_email,
         from_name=from_name,
+        reply_to=reply_to,
+        bcc=bcc_to,
     )
     return None if (result and msg_id_or_err) else (msg_id_or_err or "Unknown error")

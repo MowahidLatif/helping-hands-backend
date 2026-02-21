@@ -24,6 +24,8 @@ def send_email(
     body_html: Optional[str] = None,
     from_email: Optional[str] = None,
     from_name: Optional[str] = None,
+    reply_to: Optional[str] = None,
+    bcc: Optional[str] = None,
 ) -> Tuple[Optional[str], Optional[str]]:
     """
     Send an email via SES or SendGrid.
@@ -49,6 +51,8 @@ def send_email(
             body_html=body_html,
             from_email=from_addr,
             from_name=from_display,
+            reply_to=reply_to,
+            bcc=bcc,
         )
     if provider == "ses":
         return _send_via_ses(
@@ -58,6 +62,8 @@ def send_email(
             body_html=body_html,
             from_email=from_addr,
             from_name=from_display,
+            reply_to=reply_to,
+            bcc=bcc,
         )
     return None, f"Unknown EMAIL_PROVIDER: {provider}"
 
@@ -70,10 +76,12 @@ def _send_via_sendgrid(
     body_html: Optional[str],
     from_email: str,
     from_name: str,
+    reply_to: Optional[str] = None,
+    bcc: Optional[str] = None,
 ) -> Tuple[Optional[str], Optional[str]]:
     try:
         from sendgrid import SendGridAPIClient
-        from sendgrid.helpers.mail import Mail, Email, To, Content
+        from sendgrid.helpers.mail import Mail, Email, To, Content, Bcc, ReplyTo
 
         api_key = os.getenv("SENDGRID_API_KEY", "").strip()
         if not api_key:
@@ -87,6 +95,10 @@ def _send_via_sendgrid(
             plain_text_content=Content("text/plain", body_text),
             html_content=Content("text/html", html),
         )
+        if reply_to:
+            message.reply_to = ReplyTo(reply_to)
+        if bcc:
+            message.bcc = [Bcc(bcc)]
 
         sg = SendGridAPIClient(api_key)
         response = sg.send(message)
@@ -110,6 +122,8 @@ def _send_via_ses(
     body_html: Optional[str],
     from_email: str,
     from_name: str,
+    reply_to: Optional[str] = None,
+    bcc: Optional[str] = None,
 ) -> Tuple[Optional[str], Optional[str]]:
     try:
         import boto3
@@ -121,14 +135,22 @@ def _send_via_ses(
         if body_html:
             body["Html"] = {"Data": body_html, "Charset": "UTF-8"}
 
-        response = client.send_email(
-            Source=f"{from_name} <{from_email}>",
-            Destination={"ToAddresses": [to_email]},
-            Message={
+        destination: dict = {"ToAddresses": [to_email]}
+        if bcc:
+            destination["BccAddresses"] = [bcc]
+
+        kwargs: dict = {
+            "Source": f"{from_name} <{from_email}>",
+            "Destination": destination,
+            "Message": {
                 "Subject": {"Data": subject, "Charset": "UTF-8"},
                 "Body": body,
             },
-        )
+        }
+        if reply_to:
+            kwargs["ReplyToAddresses"] = [reply_to]
+
+        response = client.send_email(**kwargs)
         msg_id = response.get("MessageId")
         return "ses", msg_id or "unknown"
     except ClientError as e:
