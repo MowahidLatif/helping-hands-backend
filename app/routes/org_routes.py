@@ -44,6 +44,16 @@ orgs = Blueprint("orgs", __name__)
 @jwt_required()
 def create_org():
     user_id = get_jwt_identity()
+    existing = list_user_organizations(user_id)
+    if existing:
+        return (
+            jsonify(
+                {
+                    "error": "You already belong to an organization. Create a new account to start a second organization."
+                }
+            ),
+            409,
+        )
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
     sub = (data.get("subdomain") or "").strip() or None

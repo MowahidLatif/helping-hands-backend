@@ -20,21 +20,6 @@ Currency: {{ donation.currency|upper }}</p>
 <p>— The Team</p>
 """
 
-# Thank-you template (can be used for follow-up or alternative to receipt)
-DEFAULT_THANK_YOU_SUBJECT = "Thank you for supporting {{ campaign.title }}!"
-DEFAULT_THANK_YOU_TEXT = """Hi,
-
-Thank you so much for your generous support of {{ campaign.title }}.
-Your contribution makes a real difference.
-
-— The Team
-"""
-DEFAULT_THANK_YOU_HTML = """<p>Hi,</p>
-<p>Thank you so much for your generous support of <strong>{{ campaign.title }}</strong>.</p>
-<p>Your contribution makes a real difference.</p>
-<p>— The Team</p>
-"""
-
 # Winner notification template
 # prize_amount: formatted string e.g. "$1,000.00" when prize set, else None
 DEFAULT_WINNER_SUBJECT = "Congratulations! You won the {{ campaign.title }} giveaway!"
@@ -173,26 +158,6 @@ def render_receipt_content(org_id: str, donation_row: Dict[str, Any]) -> Dict[st
     return {"subject": subject, "body_text": body_text, "body_html": body_html}
 
 
-def render_thank_you_content(
-    org_id: str, donation_row: Dict[str, Any]
-) -> Dict[str, str]:
-    camp = get_campaign(donation_row["campaign_id"]) or {}
-    org_cfg = get_email_settings(org_id) or {}
-    subject_tpl = org_cfg.get("thank_you_subject") or DEFAULT_THANK_YOU_SUBJECT
-    text_tpl = org_cfg.get("thank_you_text") or DEFAULT_THANK_YOU_TEXT
-    html_tpl = org_cfg.get("thank_you_html") or DEFAULT_THANK_YOU_HTML
-    ctx = {
-        "org": {"id": org_id},
-        "campaign": {"id": camp.get("id"), "title": camp.get("title", "Our campaign")},
-        "donation": donation_row,
-    }
-    return {
-        "subject": render_template_string(subject_tpl, **ctx),
-        "body_text": render_template_string(text_tpl, **ctx),
-        "body_html": render_template_string(html_tpl, **ctx),
-    }
-
-
 def render_winner_content(
     org_id: str,
     campaign_title: str,
@@ -217,27 +182,3 @@ def render_winner_content(
         "body_text": render_template_string(text_tpl, **ctx),
         "body_html": render_template_string(html_tpl, **ctx),
     }
-
-
-def insert_receipt_row(
-    *,
-    donation_id: str,
-    to_email: str,
-    subject: str,
-    body_text: str,
-    body_html: str,
-    sent_at: Optional[str] = None,
-) -> Dict[str, Any]:
-    sql = """
-    INSERT INTO email_receipts (donation_id, to_email, subject, body_text, body_html, sent_at)
-    VALUES (%s, %s, %s, %s, %s, COALESCE(%s, now()))
-    RETURNING id, donation_id, to_email, subject, sent_at, created_at
-    """
-    with get_db_connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            sql, (donation_id, to_email, subject, body_text, body_html, sent_at)
-        )
-        row = cur.fetchone()
-        conn.commit()
-        cols = ["id", "donation_id", "to_email", "subject", "sent_at", "created_at"]
-        return dict(zip(cols, row))
