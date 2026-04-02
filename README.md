@@ -54,6 +54,11 @@ Optional OpenAI-powered JSON “recipe” for public campaign pages (`campaigns.
 - `OPENAI_AI_SITE_MODEL` — optional (default `gpt-4o-mini`)
 - `REQUIRE_PLATFORM_PAYMENT_FOR_AI` — set to `1` or `true` to require a completed Stripe platform PaymentIntent before generation
 - `STRIPE_AI_GENERATION_AMOUNT_CENTS` — platform fee amount in cents (default `500`)
+- `AI_SITE_MEDIA_URL_HOSTS` — comma-separated extra hostnames allowed in recipe media URLs (CDN / public asset domain). Hosts are also derived from `S3_ENDPOINT` and optional `PUBLIC_MEDIA_BASE_URL`. Production URLs must use `https:` (HTTP only for localhost / `*.local`).
+- `PUBLIC_MEDIA_BASE_URL` — optional canonical public base URL for assets; its hostname is added to the recipe URL allowlist
+- `MAX_CAMPAIGN_IMAGES` / `MAX_CAMPAIGN_VIDEOS` / `MAX_CAMPAIGN_DOCS` — optional per-campaign upload caps (defaults 50 / 10 / 25)
+
+The frontend should set `VITE_MEDIA_URL_HOSTS` to the same hostnames for defense-in-depth rendering (see `frontend/.env.example`).
 
 After `alembic upgrade head`, jobs are stored in `ai_generation_jobs`.
 

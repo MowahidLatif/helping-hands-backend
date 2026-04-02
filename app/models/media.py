@@ -1,5 +1,25 @@
 from typing import Any
+
 from app.utils.db import get_db_connection
+from app.utils.prompt_sanitize import sanitize_asset_description
+
+
+def count_media_by_type(campaign_id: str) -> dict[str, int]:
+    """Counts campaign_media rows by type (for upload quotas)."""
+    sql = """
+    SELECT type, COUNT(*)::int
+    FROM campaign_media
+    WHERE campaign_id = %s
+    GROUP BY type
+    """
+    out = {"image": 0, "video": 0, "doc": 0, "embed": 0}
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (campaign_id,))
+        for row in cur.fetchall():
+            t, c = row[0], row[1]
+            if t in out:
+                out[str(t)] = int(c)
+    return out
 
 
 def create_campaign_media(
@@ -14,6 +34,9 @@ def create_campaign_media(
     description: str | None = None,
     sort: int | None = 0,
 ) -> dict[str, Any]:
+    if description is not None:
+        cleaned = sanitize_asset_description(description, max_len=500)
+        description = cleaned if cleaned else None
     sql = """
     INSERT INTO campaign_media (org_id, campaign_id, type, s3_key, content_type, size_bytes, url, description, sort)
     VALUES (%s,%s,%s,%s,%s,%s,%s,%s,COALESCE(%s,0))

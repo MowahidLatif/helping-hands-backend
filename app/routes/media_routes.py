@@ -1,7 +1,17 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.models.campaign import get_campaign
-from app.models.media import create_campaign_media, get_media_item, delete_media_item
+from app.models.media import (
+    count_media_by_type,
+    create_campaign_media,
+    delete_media_item,
+    get_media_item,
+)
+from app.utils.media_limits import (
+    MAX_CAMPAIGN_DOCS,
+    MAX_CAMPAIGN_IMAGES,
+    MAX_CAMPAIGN_VIDEOS,
+)
 from app.utils.s3_helpers import (
     make_key,
     presign_put,
@@ -20,6 +30,24 @@ from app.utils.media_validators import (
 )
 
 media_bp = Blueprint("media", __name__)
+
+
+def _media_quota_error(campaign_id: str, mtype: str) -> str | None:
+    """Return error message if this insert would exceed per-campaign quotas."""
+    counts = count_media_by_type(campaign_id)
+    if mtype == "image":
+        if counts["image"] >= MAX_CAMPAIGN_IMAGES:
+            return "campaign media limit reached for type image"
+    elif mtype == "video":
+        if counts["video"] >= MAX_CAMPAIGN_VIDEOS:
+            return "campaign media limit reached for type video"
+    elif mtype == "doc":
+        if counts["doc"] >= MAX_CAMPAIGN_DOCS:
+            return "campaign media limit reached for type doc"
+    elif mtype == "other":
+        if counts["image"] >= MAX_CAMPAIGN_IMAGES:
+            return "campaign media limit reached for type image"
+    return None
 
 
 @media_bp.get("/api/media/signed-url")
@@ -119,6 +147,10 @@ def upload():
     ok, err = validate_size(size_bytes, mtype)
     if not ok:
         return jsonify({"error": err}), 400
+
+    qerr = _media_quota_error(campaign_id, mtype)
+    if qerr:
+        return jsonify({"error": qerr}), 400
 
     key = make_key(campaign["org_id"], campaign_id, filename)
     upload_object(key, file_bytes, content_type)
@@ -238,6 +270,15 @@ def persist():
                 return jsonify({"error": err}), 400
         else:
             size_bytes = None
+        quota_type: str | None = (
+            mtype
+            if mtype in ("image", "video", "doc")
+            else ("image" if mtype == "other" else None)
+        )
+        if quota_type:
+            qerr = _media_quota_error(campaign_id, quota_type)
+            if qerr:
+                return jsonify({"error": qerr}), 400
         row = create_campaign_media(
             org_id=campaign["org_id"],
             campaign_id=campaign_id,

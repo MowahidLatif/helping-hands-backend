@@ -16,6 +16,7 @@ from app.models.ai_generation_job import update_job
 from app.models.campaign import get_campaign, set_ai_site_recipe
 from app.models.media import list_media_for_campaign
 from app.utils.ai_site_recipe import recipe_schema_description, validate_ai_site_recipe
+from app.utils.prompt_sanitize import sanitize_asset_description
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_AI_SITE_MODEL", "gpt-4o-mini")
@@ -41,7 +42,7 @@ def build_asset_context(campaign_id: str) -> list[dict[str, Any]]:
                 "id": str(m.get("id", "")),
                 "type": m.get("type"),
                 "url": url,
-                "description": (m.get("description") or "")[:500],
+                "description": sanitize_asset_description(m.get("description")),
             }
         )
     return out
