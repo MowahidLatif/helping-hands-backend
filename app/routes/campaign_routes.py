@@ -12,6 +12,13 @@ from app.models.campaign import (
     delete_campaign,
     list_giveaway_logs,
 )
+from app.models.ai_generation_job import create_job, get_job
+from app.services.ai_site_service import run_generation_in_background
+from app.services.platform_ai_payment import (
+    require_payment_for_ai,
+    verify_ai_generation_payment,
+)
+from flask import current_app
 from app.utils.slug import slugify
 from app.utils.domain import validate_custom_domain
 from app.utils.page_layout import validate_layout
@@ -793,3 +800,73 @@ def delete_campaign_task_route(campaign_id, task_id):
     if not delete_campaign_task(task_id, campaign_id):
         return jsonify({"error": "not found"}), 404
     return "", 204
+
+
+def _serialize_job(row: dict) -> dict:
+    out = dict(row)
+    for k, v in list(out.items()):
+        if hasattr(v, "isoformat"):
+            out[k] = v.isoformat()
+        elif hasattr(v, "hex"):  # UUID
+            out[k] = str(v)
+    return out
+
+
+@campaigns.post("/<campaign_id>/ai-site/generate")
+@jwt_required()
+def ai_site_generate(campaign_id):
+    if not _is_uuid(campaign_id):
+        return jsonify({"error": "invalid campaign_id"}), 400
+    camp = get_campaign(campaign_id)
+    if not camp:
+        return jsonify({"error": "not found"}), 404
+    user_id = get_jwt_identity()
+    role = get_user_role_in_org(user_id, camp["org_id"])
+    if not role:
+        return jsonify({"error": "not a member"}), 403
+    if not user_has_permission(user_id, camp["org_id"], "campaign:edit", role):
+        return jsonify({"error": "forbidden: campaign:edit required"}), 403
+
+    body = request.get_json(silent=True) or {}
+    prompt = (body.get("prompt") or "").strip()
+    if not prompt:
+        return jsonify({"error": "prompt required"}), 400
+    if len(prompt) > 8000:
+        return jsonify({"error": "prompt too long"}), 400
+
+    if require_payment_for_ai():
+        pi_id = (body.get("platform_payment_intent_id") or "").strip()
+        pay_err = verify_ai_generation_payment(
+            payment_intent_id=pi_id, user_id=str(user_id)
+        )
+        if pay_err:
+            return jsonify({"error": pay_err}), 402
+
+    job = create_job(campaign_id=campaign_id, created_by_user_id=str(user_id))
+    run_generation_in_background(
+        current_app._get_current_object(),
+        str(job["id"]),
+        campaign_id,
+        prompt,
+    )
+    return jsonify({"job": _serialize_job(job)}), 202
+
+
+@campaigns.get("/<campaign_id>/ai-site/jobs/<job_id>")
+@jwt_required()
+def ai_site_job_status(campaign_id, job_id):
+    if not _is_uuid(campaign_id) or not _is_uuid(job_id):
+        return jsonify({"error": "invalid id"}), 400
+    camp = get_campaign(campaign_id)
+    if not camp:
+        return jsonify({"error": "not found"}), 404
+    user_id = get_jwt_identity()
+    role = get_user_role_in_org(user_id, camp["org_id"])
+    if not role:
+        return jsonify({"error": "not a member"}), 403
+    if not user_has_permission(user_id, camp["org_id"], "campaign:edit", role):
+        return jsonify({"error": "forbidden: campaign:edit required"}), 403
+    job = get_job(job_id, campaign_id=campaign_id)
+    if not job:
+        return jsonify({"error": "not found"}), 404
+    return jsonify({"job": _serialize_job(job)}), 200

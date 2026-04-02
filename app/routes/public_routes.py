@@ -64,7 +64,8 @@ def campaign_public(org_subdomain, camp_slug):
                    COALESCE(goal, 0) AS goal,
                    COALESCE(total_raised, 0) AS total_raised,
                    giveaway_prize_cents,
-                   page_layout
+                   page_layout,
+                   ai_site_recipe
             FROM campaigns
             WHERE org_id=%s AND slug=%s
             """,
@@ -86,6 +87,8 @@ def campaign_public(org_subdomain, camp_slug):
         resp["giveaway_prize"] = round(row[5] / 100.0, 2)
     if row[6] is not None:
         resp["page_layout"] = row[6]
+    if row[7] is not None:
+        resp["ai_site_recipe"] = row[7]
     latest = get_latest_winner_public(str(row[0]))
     if latest:
         resp["latest_winner"] = latest

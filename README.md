@@ -46,6 +46,17 @@ Covers: login, campaigns, donation checkout with message, media signed-url valid
   curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:5050/api/campaigns
   ```
 
+## AI site generation
+
+Optional OpenAI-powered JSON “recipe” for public campaign pages (`campaigns.ai_site_recipe`).
+
+- `OPENAI_API_KEY` — required for `POST /api/campaigns/<id>/ai-site/generate`
+- `OPENAI_AI_SITE_MODEL` — optional (default `gpt-4o-mini`)
+- `REQUIRE_PLATFORM_PAYMENT_FOR_AI` — set to `1` or `true` to require a completed Stripe platform PaymentIntent before generation
+- `STRIPE_AI_GENERATION_AMOUNT_CENTS` — platform fee amount in cents (default `500`)
+
+After `alembic upgrade head`, jobs are stored in `ai_generation_jobs`.
+
 ## Release (v1+)
 
 See [app/docs/RELEASE.md](app/docs/RELEASE.md) for schema freeze and tagging.
