@@ -17,40 +17,19 @@ if __name__ == "__main__":
         log_output=True,
     )
 
-# --- SCHEDULE ---
+# How to run app
 
-# Morning:
-# open -a Docker
-# docker compose --env-file .env.docker up -d
-# docker compose --env-file .env.docker ps
-# poetry run flask --app app:create_app --debug run
-
-# Stopping:
-# CTRL+C
-# docker compose --env-file .env.docker down
-
-# .env (CORS for your local frontends)
-# SOCKETIO_CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173
-
-# New Process:
-
-# Bring up local services
-# open -a Docker
+# backend run command
+# cd /Users/mowahidlatif/Code/donation-backend
 # docker compose --env-file .env.docker up -d
 
-# Start your API + Socket.IO together (single process)
-# PORT=5050 poetry run python run.py OR poetry run python run.py
-
-# Stop the Python process with Ctrl+C in that terminal
-# Then bring down containers:
-# docker compose --env-file .env.docker down
-
-# python -m http.server 8080
-# http://127.0.0.1:8080/realtime_test.html
-
-# Alembic run case to generate new file.
-# poetry run alembic revision -m "Add subdomain and slug"
-
-# Testing cases for day 1 pt 2
-# export SERVER_NAME=helpinghands.local:5050
+# backend run command
+# poetry install
+# poetry run alembic upgrade head
 # PORT=5050 poetry run python run.py
+
+# frontend run command
+# cd /Users/mowahidlatif/Code/frontend
+# cp .env.example .env
+# npm install
+# npm run dev
