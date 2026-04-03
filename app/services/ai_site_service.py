@@ -5,6 +5,7 @@ Build master prompts, call OpenAI, validate recipe, persist to campaign.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import threading
@@ -15,23 +16,36 @@ from typing import Any
 from app.models.ai_generation_job import update_job
 from app.models.campaign import get_campaign, set_ai_site_recipe
 from app.models.media import list_media_for_campaign
+from app.utils.ai_media_selection import select_media_for_ai_prompt
 from app.utils.ai_site_recipe import recipe_schema_description, validate_ai_site_recipe
 from app.utils.prompt_sanitize import sanitize_asset_description
+
+logger = logging.getLogger(__name__)
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_AI_SITE_MODEL", "gpt-4o-mini")
 MAX_USER_PROMPT_LEN = 8000
-MAX_ASSETS_IN_PROMPT = 24
+# Balanced round-robin cap (see ai_media_selection); override with OPENAI_AI_SITE_MAX_ASSETS (1–80)
+_MAX_ASSETS_RAW = int(os.getenv("OPENAI_AI_SITE_MAX_ASSETS", "32"))
+MAX_ASSETS_IN_PROMPT = max(1, min(80, _MAX_ASSETS_RAW))
+_ASSETS_JSON_RAW = int(os.getenv("OPENAI_AI_SITE_ASSETS_JSON_MAX", "20000"))
+ASSETS_JSON_BUDGET = max(4000, min(100_000, _ASSETS_JSON_RAW))
 
 
 def _strip_control(s: str) -> str:
     return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", s)[:MAX_USER_PROMPT_LEN]
 
 
-def build_asset_context(campaign_id: str) -> list[dict[str, Any]]:
-    items = list_media_for_campaign(campaign_id)[:MAX_ASSETS_IN_PROMPT]
-    out = []
-    for m in items:
+def build_asset_context(campaign_id: str) -> tuple[list[dict[str, Any]], int]:
+    """
+    Returns (assets_for_prompt, total_media_count_for_campaign).
+    Selection is round-robin by type so videos/docs are not drowned out by many images.
+    """
+    raw = list_media_for_campaign(campaign_id)
+    total = len(raw)
+    selected = select_media_for_ai_prompt(raw, MAX_ASSETS_IN_PROMPT)
+    out: list[dict[str, Any]] = []
+    for m in selected:
         url = m.get("url") or ""
         if not url and m.get("s3_key"):
             from app.utils.s3_helpers import public_url
@@ -45,7 +59,7 @@ def build_asset_context(campaign_id: str) -> list[dict[str, Any]]:
                 "description": sanitize_asset_description(m.get("description")),
             }
         )
-    return out
+    return out, total
 
 
 def build_master_prompt(
@@ -53,6 +67,7 @@ def build_master_prompt(
     user_prompt: str,
     campaign_title: str,
     assets: list[dict[str, Any]],
+    total_campaign_assets: int,
 ) -> tuple[str, str]:
     """
     Returns (system_message, user_message).
@@ -64,11 +79,19 @@ def build_master_prompt(
         + "\nCampaign title (context): "
         + _strip_control(campaign_title or "Fundraiser")[:200]
     )
+    n = len(assets)
+    total = total_campaign_assets
+    assets_json = json.dumps(assets, indent=2)
+    if len(assets_json) > ASSETS_JSON_BUDGET:
+        assets_json = assets_json[:ASSETS_JSON_BUDGET] + "\n... (truncated)"
     user_msg = (
         "User request:\n"
         + user_prompt
-        + "\n\nAvailable media assets (use these URLs in the layout):\n"
-        + json.dumps(assets, indent=2)[:12000]
+        + f"\n\nNote: Listed below are up to {n} of {total} total campaign assets "
+        "(balanced across image, video, document, and embed types where present). "
+        "Use only URLs from this list in the recipe.\n\n"
+        + "Available media assets (use these URLs in the layout):\n"
+        + assets_json
     )
     return system, user_msg
 
@@ -123,15 +146,26 @@ def generate_and_validate_recipe(
     camp = get_campaign(campaign_id)
     if not camp:
         raise RuntimeError("campaign not found")
-    assets = build_asset_context(campaign_id)
+    assets, total_assets = build_asset_context(campaign_id)
     system, user_msg = build_master_prompt(
         user_prompt=user_prompt,
         campaign_title=str(camp.get("title") or ""),
         assets=assets,
+        total_campaign_assets=total_assets,
     )
     parsed = _openai_chat_json(system, user_msg)
     recipe, err = validate_ai_site_recipe(parsed)
     if err or not recipe:
+        try:
+            parsed_size = len(json.dumps(parsed, ensure_ascii=False))
+        except (TypeError, ValueError):
+            parsed_size = -1
+        logger.warning(
+            "ai_site_recipe validation failed (campaign_id=%s, parsed_json_chars=%s): %s",
+            campaign_id,
+            parsed_size,
+            err or "unknown",
+        )
         # One repair attempt: ask model to fix
         repair_system = (
             "You output invalid JSON for a site recipe. Fix it. "
@@ -143,6 +177,11 @@ def generate_and_validate_recipe(
         parsed2 = _openai_chat_json(repair_system, repair_user)
         recipe, err = validate_ai_site_recipe(parsed2)
         if err or not recipe:
+            logger.error(
+                "ai_site_recipe validation failed after repair (campaign_id=%s): %s",
+                campaign_id,
+                err or "unknown",
+            )
             raise RuntimeError(err or "recipe validation failed after repair")
     return recipe
 
