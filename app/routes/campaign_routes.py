@@ -266,6 +266,10 @@ def draw_winner_route(campaign_id):
         min_amount_cents=min_amount_cents,
         notes=notes,
     )
+    if status == 200:
+        from app.utils.public_campaign_cache import invalidate_public_campaign_cache
+
+        invalidate_public_campaign_cache(campaign_id)
     return jsonify(payload), status
 
 

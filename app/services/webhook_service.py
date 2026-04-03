@@ -14,6 +14,7 @@ from app.models.campaign import (
     record_platform_fee_if_goal_reached,
 )
 from app.utils.cache import r
+from app.utils.public_campaign_cache import invalidate_public_campaign_cache
 from app.realtime import socketio
 from app.models.stripe_event import mark_event_processed
 from app.tasks import enqueue_receipt_email
@@ -140,6 +141,7 @@ def process_stripe_event(
                 r().delete(f"campaign:{cid}:progress:v1")
             except Exception as e:
                 print(f"[error] redis cache bust campaign:{cid}: {e}", flush=True)
+            invalidate_public_campaign_cache(str(cid))
             if new_status == "succeeded":
                 try:
                     record_platform_fee_if_goal_reached(cid)

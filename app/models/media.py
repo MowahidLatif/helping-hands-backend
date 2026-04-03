@@ -105,7 +105,7 @@ def list_media_for_campaign(campaign_id: str) -> list[dict[str, Any]]:
 
 def get_media_item(media_id: str) -> dict | None:
     sql = """
-        SELECT id, org_id, campaign_id, type, s3_key
+        SELECT id, org_id, campaign_id, type, s3_key, url
         FROM campaign_media
         WHERE id = %s
     """
@@ -114,7 +114,7 @@ def get_media_item(media_id: str) -> dict | None:
         row = cur.fetchone()
         if not row:
             return None
-        return dict(zip(["id", "org_id", "campaign_id", "type", "s3_key"], row))
+        return dict(zip(["id", "org_id", "campaign_id", "type", "s3_key", "url"], row))
 
 
 def delete_media_item(media_id: str) -> bool:

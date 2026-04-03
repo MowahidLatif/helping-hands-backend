@@ -3,7 +3,8 @@ from uuid import UUID
 from flask import Blueprint, jsonify, request, send_from_directory
 from app.utils.page_layout import BLOCK_TYPES, BLOCK_SCHEMA
 from app.utils.db import get_db_connection
-from app.models.campaign import get_latest_winner_public
+from app.utils.public_campaign_cache import respond_public_campaign_json
+from app.utils.public_campaign_payload import build_public_campaign_dict
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 from app.models.user import get_user_profile_by_id, update_user_profile
 
@@ -67,24 +68,9 @@ def campaign_public_no_subdomain(org_subdomain, camp_slug):
         if not row:
             return jsonify({"error": "campaign not found"}), 404
 
-    resp = {
-        "id": str(row[0]),
-        "title": row[1],
-        "slug": row[2],
-        "goal": float(row[3]),
-        "total_raised": float(row[4]),
-    }
-    if row[5] is not None:
-        resp["giveaway_prize_cents"] = row[5]
-        resp["giveaway_prize"] = round(row[5] / 100.0, 2)
-    if row[6] is not None:
-        resp["page_layout"] = row[6]
-    if row[7] is not None:
-        resp["ai_site_recipe"] = row[7]
-    latest = get_latest_winner_public(str(row[0]))
-    if latest:
-        resp["latest_winner"] = latest
-    return jsonify(resp), 200
+    cid = str(row[0])
+    resp = build_public_campaign_dict(row, cid)
+    return respond_public_campaign_json(resp, cid)
 
 
 @core.get("/api/campaigns/<campaign_id>/public")
@@ -113,24 +99,8 @@ def campaign_public_by_id(campaign_id):
         if not row:
             return jsonify({"error": "campaign not found"}), 404
 
-    resp = {
-        "id": str(row[0]),
-        "title": row[1],
-        "slug": row[2],
-        "goal": float(row[3]),
-        "total_raised": float(row[4]),
-    }
-    if row[5] is not None:
-        resp["giveaway_prize_cents"] = row[5]
-        resp["giveaway_prize"] = round(row[5] / 100.0, 2)
-    if row[6] is not None:
-        resp["page_layout"] = row[6]
-    if row[7] is not None:
-        resp["ai_site_recipe"] = row[7]
-    latest = get_latest_winner_public(campaign_id)
-    if latest:
-        resp["latest_winner"] = latest
-    return jsonify(resp), 200
+    resp = build_public_campaign_dict(row, campaign_id)
+    return respond_public_campaign_json(resp, campaign_id)
 
 
 @core.get("/api/page-layout/schema")

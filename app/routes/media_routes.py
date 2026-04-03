@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from app.models.campaign import get_campaign
+from app.models.campaign import get_campaign, set_ai_site_recipe, set_page_layout
 from app.models.media import (
     count_media_by_type,
     create_campaign_media,
@@ -189,6 +189,42 @@ def delete_media(media_id):
     if role not in ("admin", "owner"):
         return jsonify({"error": "forbidden"}), 403
 
+    from app.utils.public_campaign_cache import invalidate_public_campaign_cache
+    from app.utils.recipe_media_cleanup import (
+        removed_media_url_set,
+        strip_removed_urls_from_page_layout,
+        strip_removed_urls_from_recipe,
+    )
+
+    campaign_id = str(item["campaign_id"])
+    removed = removed_media_url_set(
+        stored_url=item.get("url"),
+        s3_key=item.get("s3_key"),
+    )
+    if removed:
+        camp = get_campaign(campaign_id)
+        if camp:
+            recipe = camp.get("ai_site_recipe")
+            if isinstance(recipe, dict):
+                new_r, r_changed = strip_removed_urls_from_recipe(recipe, removed)
+                if r_changed and new_r is not None:
+                    set_ai_site_recipe(campaign_id, new_r)
+                elif r_changed and new_r is None:
+                    print(
+                        "[media delete] ai_site_recipe cleanup invalid; recipe unchanged",
+                        flush=True,
+                    )
+            layout = camp.get("page_layout")
+            if isinstance(layout, dict):
+                new_l, l_changed = strip_removed_urls_from_page_layout(layout, removed)
+                if l_changed and new_l is not None:
+                    set_page_layout(campaign_id, new_l)
+                elif l_changed and new_l is None:
+                    print(
+                        "[media delete] page_layout cleanup invalid; layout unchanged",
+                        flush=True,
+                    )
+
     if item.get("s3_key"):
         try:
             delete_object(item["s3_key"])
@@ -196,6 +232,7 @@ def delete_media(media_id):
             print(f"[error] s3 delete {item['s3_key']}: {e}", flush=True)
 
     delete_media_item(media_id)
+    invalidate_public_campaign_cache(campaign_id)
     return "", 204
 
 

@@ -1,7 +1,8 @@
 import os
 from flask import Blueprint, jsonify, send_from_directory
 from app.utils.db import get_db_connection
-from app.models.campaign import get_latest_winner_public
+from app.utils.public_campaign_cache import respond_public_campaign_json
+from app.utils.public_campaign_payload import build_public_campaign_dict
 
 public = Blueprint("public", __name__, subdomain="<org_subdomain>")
 _STATIC = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "static")
@@ -75,24 +76,9 @@ def campaign_public(org_subdomain, camp_slug):
         if not row:
             return jsonify({"error": "campaign not found"}), 404
 
-    resp = {
-        "id": str(row[0]),
-        "title": row[1],
-        "slug": row[2],
-        "goal": float(row[3]),
-        "total_raised": float(row[4]),
-    }
-    if row[5] is not None:
-        resp["giveaway_prize_cents"] = row[5]
-        resp["giveaway_prize"] = round(row[5] / 100.0, 2)
-    if row[6] is not None:
-        resp["page_layout"] = row[6]
-    if row[7] is not None:
-        resp["ai_site_recipe"] = row[7]
-    latest = get_latest_winner_public(str(row[0]))
-    if latest:
-        resp["latest_winner"] = latest
-    return jsonify(resp), 200
+    cid = str(row[0])
+    resp = build_public_campaign_dict(row, cid)
+    return respond_public_campaign_json(resp, cid)
 
 
 @public.get("/donate/<camp_slug>")

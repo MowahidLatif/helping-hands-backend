@@ -174,7 +174,12 @@ def set_page_layout(campaign_id: str, layout: dict[str, Any] | None) -> bool:
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, (Json(layout) if layout else None, campaign_id))
         conn.commit()
-        return cur.rowcount > 0
+        ok = cur.rowcount > 0
+    if ok:
+        from app.utils.public_campaign_cache import invalidate_public_campaign_cache
+
+        invalidate_public_campaign_cache(campaign_id)
+    return ok
 
 
 def set_ai_site_recipe(campaign_id: str, recipe: dict[str, Any] | None) -> bool:
@@ -185,7 +190,12 @@ def set_ai_site_recipe(campaign_id: str, recipe: dict[str, Any] | None) -> bool:
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, (Json(recipe) if recipe else None, campaign_id))
         conn.commit()
-        return cur.rowcount > 0
+        ok = cur.rowcount > 0
+    if ok:
+        from app.utils.public_campaign_cache import invalidate_public_campaign_cache
+
+        invalidate_public_campaign_cache(campaign_id)
+    return ok
 
 
 def list_campaigns(
@@ -317,6 +327,9 @@ def update_campaign(
             "created_at",
             "updated_at",
         ]
+        from app.utils.public_campaign_cache import invalidate_public_campaign_cache
+
+        invalidate_public_campaign_cache(campaign_id)
         return dict(zip(cols, row))
 
 
