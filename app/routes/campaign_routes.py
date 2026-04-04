@@ -11,6 +11,7 @@ from app.models.campaign import (
     update_campaign,
     delete_campaign,
     list_giveaway_logs,
+    is_fee_option_locked,
 )
 from app.models.ai_generation_job import create_job, get_job
 from app.services.platform_ai_payment import (
@@ -71,6 +72,7 @@ from app.tasks import (
 from app.services.fee_policy_service import (
     FEE_OPTION_DONOR_PAYS,
     FEE_OPTION_PLATFORM_ABSORBS,
+    FEE_POLICY_VERSION,
 )
 from app.services.settlement_service import (
     execute_campaign_payout,
@@ -200,7 +202,38 @@ def patch(campaign_id):
                 jsonify({"error": "fee_option must be donor_pays or platform_absorbs"}),
                 400,
             )
+        current_fee_option = (camp.get("fee_option") or "").strip().lower()
+        if fee_option != current_fee_option and is_fee_option_locked(
+            camp.get("status")
+        ):
+            if (camp.get("status") or "").lower() == "completed":
+                return (
+                    jsonify(
+                        {
+                            "error": "fee_option cannot be changed after campaign completion"
+                        }
+                    ),
+                    409,
+                )
+            return (
+                jsonify(
+                    {
+                        "error": "fee_option cannot be changed after campaign is published (active)"
+                    }
+                ),
+                409,
+            )
         updates["fee_option"] = fee_option
+    if "fee_policy_version" in body:
+        return jsonify({"error": "fee_policy_version is immutable"}), 400
+
+    # Snapshot policy version at publish time if campaign is transitioning draft -> active.
+    next_status = (updates.get("status") or camp.get("status") or "").strip().lower()
+    current_status = (camp.get("status") or "").strip().lower()
+    if current_status == "draft" and next_status == "active":
+        updates["fee_policy_version"] = (
+            camp.get("fee_policy_version") or FEE_POLICY_VERSION
+        )
 
     try:
         newrow = update_campaign(campaign_id, **updates)
@@ -256,6 +289,7 @@ def campaign_progress(campaign_id):
         "percent": percent,
         "donations_count": count,
         "last_donation_at": last_dt,
+        "fee_option_locked": bool(camp.get("fee_option_locked")),
     }
     summary = summarize_succeeded_donations(campaign_id)
     resp["fee_option"] = camp.get("fee_option") or FEE_OPTION_DONOR_PAYS

@@ -32,6 +32,20 @@ def _patch_common(monkeypatch):
         "app.services.webhook_service.enqueue_receipt_email",
         lambda *_args, **_kwargs: None,
     )
+    monkeypatch.setattr(
+        "app.services.webhook_service.get_campaign",
+        lambda _campaign_id: {
+            "id": _campaign_id,
+            "status": "active",
+            "fee_option": "donor_pays",
+            "fee_policy_version": "v1",
+            "total_raised": 0,
+        },
+    )
+    monkeypatch.setattr(
+        "app.services.webhook_service.update_donation_accounting",
+        lambda *_args, **_kwargs: None,
+    )
 
 
 def test_payment_intent_succeeded_updates_status(monkeypatch):

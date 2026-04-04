@@ -3,6 +3,16 @@ from typing import Any
 from app.utils.slug import slugify, slugify_with_fallback
 
 
+def is_fee_option_locked(status: str | None) -> bool:
+    return (status or "").lower() != "draft"
+
+
+def _augment_campaign_row(data: dict[str, Any]) -> dict[str, Any]:
+    out = dict(data)
+    out["fee_option_locked"] = is_fee_option_locked(out.get("status"))
+    return out
+
+
 def insert_campaign(data):
     conn = get_db_connection()
     cur = conn.cursor()
@@ -140,7 +150,7 @@ def create_campaign(
             "created_at",
             "updated_at",
         ]
-        return dict(zip(cols, row))
+        return _augment_campaign_row(dict(zip(cols, row)))
 
 
 def get_campaign(campaign_id: str) -> dict[str, Any] | None:
@@ -174,7 +184,7 @@ def get_campaign(campaign_id: str) -> dict[str, Any] | None:
             "created_at",
             "updated_at",
         ]
-        return dict(zip(cols, row))
+        return _augment_campaign_row(dict(zip(cols, row)))
 
 
 def get_page_layout(campaign_id: str) -> dict[str, Any] | None:
@@ -260,7 +270,7 @@ def list_campaigns(
             "created_at",
             "updated_at",
         ]
-        return [dict(zip(cols, r)) for r in rows]
+        return [_augment_campaign_row(dict(zip(cols, r))) for r in rows]
 
 
 def record_platform_fee_if_goal_reached(campaign_id: str) -> bool:
@@ -336,7 +346,10 @@ def update_campaign(
         sets.append("giveaway_prize_cents = %s")
         params.append(giveaway_prize_cents)
     if fee_option is not None:
-        sets.append("fee_option = %s")
+        # Defense in depth: fee option is mutable only while campaign is draft.
+        sets.append(
+            "fee_option = CASE WHEN status = 'draft' THEN %s ELSE fee_option END"
+        )
         params.append(fee_option)
     if fee_policy_version is not None:
         sets.append("fee_policy_version = %s")
@@ -375,7 +388,7 @@ def update_campaign(
         from app.utils.public_campaign_cache import invalidate_public_campaign_cache
 
         invalidate_public_campaign_cache(campaign_id)
-        return dict(zip(cols, row))
+        return _augment_campaign_row(dict(zip(cols, row)))
 
 
 def delete_campaign(campaign_id: str) -> bool:

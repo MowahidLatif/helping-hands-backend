@@ -194,7 +194,8 @@ def _apply_status_update(
             update_donation_accounting(
                 donation_id=str(d["id"]),
                 fee_option=accounting.fee_option,
-                fee_policy_version=accounting.fee_policy_version,
+                fee_policy_version=campaign.get("fee_policy_version")
+                or accounting.fee_policy_version,
                 stripe_balance_transaction_id=stripe_bt_id,
                 stripe_processing_fee_cents=accounting.stripe_processing_fee_cents,
                 platform_fee_percent=accounting.platform_fee_percent,

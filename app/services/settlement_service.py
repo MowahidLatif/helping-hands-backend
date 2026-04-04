@@ -170,6 +170,7 @@ def get_campaign_finance_summary(campaign_id: str) -> dict[str, Any]:
         "org_id": campaign["org_id"],
         "fee_option": normalize_fee_option(campaign.get("fee_option")),
         "fee_policy_version": campaign.get("fee_policy_version") or FEE_POLICY_VERSION,
+        "fee_option_locked": bool(campaign.get("fee_option_locked")),
         "running_totals": running,
         "pending_payout_cents": int(running.get("net_payout_cents") or 0),
         "settlement": _serialize(settlement),
