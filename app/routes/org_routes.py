@@ -7,6 +7,7 @@ from app.models.org import (
     get_organization,
     update_organization_name,
     delete_organization,
+    upsert_org_payout_account,
 )
 from app.models.org_user import (
     add_user_to_org,
@@ -31,6 +32,7 @@ from app.models.task_status import (
 from app.models.org_email_settings import get_email_settings, upsert_email_settings
 from app.services.auth_service import _hash_password
 import re
+import os
 
 from app.utils.db import get_db_connection
 from app.utils.slug import slugify_with_fallback
@@ -93,6 +95,87 @@ def rename_org(org_id):
     if not org:
         return jsonify({"error": "not found"}), 404
     return jsonify(org), 200
+
+
+@orgs.get("/api/orgs/<org_id>/payout-account")
+@require_org_role("admin", "owner")
+def get_org_payout_account(org_id):
+    org = get_organization(org_id)
+    if not org:
+        return jsonify({"error": "not found"}), 404
+    return (
+        jsonify(
+            {
+                "org_id": org_id,
+                "stripe_connect_account_id": org.get("stripe_connect_account_id"),
+                "payout_account_ready": bool(org.get("payout_account_ready")),
+                "payout_onboarding_status": org.get("payout_onboarding_status"),
+                "payouts_enabled": bool(org.get("payouts_enabled")),
+            }
+        ),
+        200,
+    )
+
+
+@orgs.patch("/api/orgs/<org_id>/payout-account")
+@require_org_role("admin", "owner")
+def patch_org_payout_account(org_id):
+    payload = request.get_json(silent=True) or {}
+    acct = payload.get("stripe_connect_account_id")
+    ready = payload.get("payout_account_ready")
+    status = payload.get("payout_onboarding_status")
+    payouts_enabled = payload.get("payouts_enabled")
+    updated = upsert_org_payout_account(
+        org_id=org_id,
+        stripe_connect_account_id=acct.strip() if isinstance(acct, str) else acct,
+        payout_account_ready=bool(ready) if ready is not None else None,
+        payout_onboarding_status=(str(status).strip() if status is not None else None),
+        payouts_enabled=(
+            bool(payouts_enabled) if payouts_enabled is not None else None
+        ),
+    )
+    if not updated:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(updated), 200
+
+
+@orgs.post("/api/orgs/<org_id>/payout-account/onboarding-link")
+@require_org_role("admin", "owner")
+def create_org_payout_onboarding_link(org_id):
+    org = get_organization(org_id)
+    if not org:
+        return jsonify({"error": "not found"}), 404
+    account_id = org.get("stripe_connect_account_id")
+    if not account_id:
+        return jsonify({"error": "stripe_connect_account_id not set"}), 400
+    stripe_secret = (os.getenv("STRIPE_SECRET_KEY") or "").strip()
+    refresh_url = (os.getenv("STRIPE_CONNECT_REFRESH_URL") or "").strip()
+    return_url = (os.getenv("STRIPE_CONNECT_RETURN_URL") or "").strip()
+    if not stripe_secret or not refresh_url or not return_url:
+        return (
+            jsonify(
+                {
+                    "error": "missing STRIPE_SECRET_KEY, STRIPE_CONNECT_REFRESH_URL, or STRIPE_CONNECT_RETURN_URL"
+                }
+            ),
+            400,
+        )
+    try:
+        import stripe
+
+        stripe.api_key = stripe_secret
+        link = stripe.AccountLink.create(
+            account=account_id,
+            refresh_url=refresh_url,
+            return_url=return_url,
+            type="account_onboarding",
+        )
+        return (
+            jsonify({"url": link.get("url"), "expires_at": link.get("expires_at")}),
+            200,
+        )
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
 
 
 @orgs.delete("/api/orgs/<org_id>")

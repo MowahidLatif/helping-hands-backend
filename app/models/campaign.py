@@ -96,17 +96,32 @@ def create_campaign(
     status: str = "draft",
     custom_domain: str | None = None,
     giveaway_prize_cents: int | None = None,
+    fee_option: str = "donor_pays",
+    fee_policy_version: str = "v1",
 ) -> dict[str, Any]:
     slug = unique_slug_for_org(org_id, title)
     sql = """
-    INSERT INTO campaigns (org_id, title, slug, goal, status, custom_domain, giveaway_prize_cents)
-    VALUES (%s, %s, %s, %s, %s, %s, %s)
-    RETURNING id, org_id, title, slug, goal, status, custom_domain, total_raised, giveaway_prize_cents, created_at, updated_at
+    INSERT INTO campaigns (
+      org_id, title, slug, goal, status, custom_domain, giveaway_prize_cents, fee_option, fee_policy_version
+    )
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+    RETURNING id, org_id, title, slug, goal, status, custom_domain, total_raised,
+              fee_option, fee_policy_version, giveaway_prize_cents, created_at, updated_at
     """
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
             sql,
-            (org_id, title, slug, goal, status, custom_domain, giveaway_prize_cents),
+            (
+                org_id,
+                title,
+                slug,
+                goal,
+                status,
+                custom_domain,
+                giveaway_prize_cents,
+                fee_option,
+                fee_policy_version,
+            ),
         )
         row = cur.fetchone()
         conn.commit()
@@ -119,6 +134,8 @@ def create_campaign(
             "status",
             "custom_domain",
             "total_raised",
+            "fee_option",
+            "fee_policy_version",
             "giveaway_prize_cents",
             "created_at",
             "updated_at",
@@ -128,6 +145,7 @@ def create_campaign(
 
 def get_campaign(campaign_id: str) -> dict[str, Any] | None:
     sql = """SELECT id, org_id, title, slug, goal, status, custom_domain, total_raised,
+             fee_option, fee_policy_version,
              platform_fee_cents, platform_fee_percent, platform_fee_recorded_at,
              giveaway_prize_cents, page_layout, ai_site_recipe, created_at, updated_at
              FROM campaigns WHERE id = %s"""
@@ -145,6 +163,8 @@ def get_campaign(campaign_id: str) -> dict[str, Any] | None:
             "status",
             "custom_domain",
             "total_raised",
+            "fee_option",
+            "fee_policy_version",
             "platform_fee_cents",
             "platform_fee_percent",
             "platform_fee_recorded_at",
@@ -204,6 +224,7 @@ def list_campaigns(
 ) -> list[dict[str, Any]]:
     sql = """
     SELECT id, org_id, title, slug, goal, status, custom_domain, total_raised,
+           fee_option, fee_policy_version,
            platform_fee_cents, platform_fee_percent, platform_fee_recorded_at,
            giveaway_prize_cents, page_layout, ai_site_recipe, created_at, updated_at
     FROM campaigns
@@ -228,6 +249,8 @@ def list_campaigns(
             "status",
             "custom_domain",
             "total_raised",
+            "fee_option",
+            "fee_policy_version",
             "platform_fee_cents",
             "platform_fee_percent",
             "platform_fee_recorded_at",
@@ -245,19 +268,31 @@ def record_platform_fee_if_goal_reached(campaign_id: str) -> bool:
     If campaign has reached its goal and no fee has been recorded yet,
     calculate and record the platform fee. Returns True if fee was recorded.
     """
-    from app.utils.platform_fees import calculate_platform_fee
+    from app.services.fee_policy_service import (
+        get_platform_fee_percent,
+        normalize_fee_option,
+    )
 
-    sql = """SELECT goal, total_raised, platform_fee_recorded_at
+    sql = """SELECT goal, total_raised, platform_fee_recorded_at, fee_option
              FROM campaigns WHERE id = %s"""
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, (campaign_id,))
         row = cur.fetchone()
         if not row:
             return False
-        goal, total_raised, fee_recorded_at = float(row[0]), float(row[1]), row[2]
+        goal, total_raised, fee_recorded_at, fee_option = (
+            float(row[0]),
+            float(row[1]),
+            row[2],
+            row[3],
+        )
         if fee_recorded_at is not None or goal <= 0 or total_raised < goal:
             return False
-        pct, _, fee_cents = calculate_platform_fee(total_raised)
+        pct = get_platform_fee_percent(
+            fee_option=normalize_fee_option(fee_option),
+            campaign_total_dollars=total_raised,
+        )
+        fee_cents = int(round(total_raised * (pct / 100.0) * 100))
         cur.execute(
             """UPDATE campaigns
                SET platform_fee_cents = %s, platform_fee_percent = %s,
@@ -278,6 +313,8 @@ def update_campaign(
     slug: str | None = None,
     custom_domain: str | None = None,
     giveaway_prize_cents: int | None = None,
+    fee_option: str | None = None,
+    fee_policy_version: str | None = None,
 ) -> dict[str, Any] | None:
     sets, params = [], []
     if title is not None:
@@ -298,10 +335,16 @@ def update_campaign(
     if giveaway_prize_cents is not None:
         sets.append("giveaway_prize_cents = %s")
         params.append(giveaway_prize_cents)
+    if fee_option is not None:
+        sets.append("fee_option = %s")
+        params.append(fee_option)
+    if fee_policy_version is not None:
+        sets.append("fee_policy_version = %s")
+        params.append(fee_policy_version)
     if not sets:
         return get_campaign(campaign_id)
     sets.append("updated_at = now()")
-    sql = f"UPDATE campaigns SET {', '.join(sets)} WHERE id = %s RETURNING id, org_id, title, slug, goal, status, custom_domain, total_raised, platform_fee_cents, platform_fee_percent, platform_fee_recorded_at, giveaway_prize_cents, page_layout, ai_site_recipe, created_at, updated_at"
+    sql = f"UPDATE campaigns SET {', '.join(sets)} WHERE id = %s RETURNING id, org_id, title, slug, goal, status, custom_domain, total_raised, fee_option, fee_policy_version, platform_fee_cents, platform_fee_percent, platform_fee_recorded_at, giveaway_prize_cents, page_layout, ai_site_recipe, created_at, updated_at"
     params.append(campaign_id)
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, tuple(params))
@@ -318,6 +361,8 @@ def update_campaign(
             "status",
             "custom_domain",
             "total_raised",
+            "fee_option",
+            "fee_policy_version",
             "platform_fee_cents",
             "platform_fee_percent",
             "platform_fee_recorded_at",

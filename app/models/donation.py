@@ -15,7 +15,10 @@ def create_donation(
     sql = """
     INSERT INTO donations (org_id, campaign_id, amount_cents, currency, donor_email, message, status)
     VALUES (%s, %s, %s, %s, %s, %s, 'initiated')
-    RETURNING id, org_id, campaign_id, amount_cents, currency, donor_email, message, status, created_at, updated_at
+    RETURNING id, org_id, campaign_id, amount_cents, currency, donor_email, message, status,
+              fee_option, fee_policy_version, stripe_processing_fee_cents, platform_fee_percent,
+              platform_fee_cents, donor_fee_cents, platform_absorbed_fee_cents, net_to_org_cents,
+              created_at, updated_at
     """
     with get_db_connection() as conn, conn.cursor() as cur:
         msg_val = (message or "").strip()[:2000] or None
@@ -34,6 +37,14 @@ def create_donation(
             "donor_email",
             "message",
             "status",
+            "fee_option",
+            "fee_policy_version",
+            "stripe_processing_fee_cents",
+            "platform_fee_percent",
+            "platform_fee_cents",
+            "donor_fee_cents",
+            "platform_absorbed_fee_cents",
+            "net_to_org_cents",
             "created_at",
             "updated_at",
         ]
@@ -51,7 +62,10 @@ def set_payment_intent(donation_id: str, pi_id: str) -> None:
 
 def get_donation(donation_id: str) -> dict[str, Any] | None:
     sql = """SELECT id, org_id, campaign_id, amount_cents, currency, donor_email,
-             message, status, stripe_payment_intent_id, created_at, updated_at
+             message, status, stripe_payment_intent_id, fee_option, fee_policy_version,
+             stripe_balance_transaction_id, stripe_processing_fee_cents,
+             platform_fee_percent, platform_fee_cents, donor_fee_cents,
+             platform_absorbed_fee_cents, net_to_org_cents, created_at, updated_at
              FROM donations WHERE id = %s"""
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, (donation_id,))
@@ -68,6 +82,15 @@ def get_donation(donation_id: str) -> dict[str, Any] | None:
             "message",
             "status",
             "stripe_payment_intent_id",
+            "fee_option",
+            "fee_policy_version",
+            "stripe_balance_transaction_id",
+            "stripe_processing_fee_cents",
+            "platform_fee_percent",
+            "platform_fee_cents",
+            "donor_fee_cents",
+            "platform_absorbed_fee_cents",
+            "net_to_org_cents",
             "created_at",
             "updated_at",
         ]
@@ -109,12 +132,19 @@ def select_donations_by_campaign(campaign_id: str) -> List[Dict[str, Any]]:
         "donor_email",
         "message",
         "status",
+        "fee_option",
+        "stripe_processing_fee_cents",
+        "platform_fee_cents",
+        "donor_fee_cents",
+        "platform_absorbed_fee_cents",
+        "net_to_org_cents",
         "created_at",
         "updated_at",
     ]
     sql = """
         SELECT id, org_id, campaign_id, amount_cents, currency, donor_email,
-               message, status, created_at, updated_at
+               message, status, fee_option, stripe_processing_fee_cents, platform_fee_cents,
+               donor_fee_cents, platform_absorbed_fee_cents, net_to_org_cents, created_at, updated_at
         FROM donations
         WHERE campaign_id = %s
         ORDER BY created_at DESC
@@ -156,12 +186,19 @@ def list_donations_paginated(
         "donor_email",
         "message",
         "status",
+        "fee_option",
+        "stripe_processing_fee_cents",
+        "platform_fee_cents",
+        "donor_fee_cents",
+        "platform_absorbed_fee_cents",
+        "net_to_org_cents",
         "created_at",
         "updated_at",
     ]
     base_sql = """
-        SELECT id, campaign_id, amount_cents, currency, donor_email,
-               message, status, created_at, updated_at
+        SELECT id, campaign_id, amount_cents, currency, donor_email, message, status,
+               fee_option, stripe_processing_fee_cents, platform_fee_cents, donor_fee_cents,
+               platform_absorbed_fee_cents, net_to_org_cents, created_at, updated_at
         FROM donations
         WHERE campaign_id = %s
     """
@@ -209,6 +246,78 @@ def get_donation_by_pi(pi_id: str) -> dict[str, Any] | None:
             "stripe_payment_intent_id",
         ]
         return dict(zip(cols, row))
+
+
+def update_donation_accounting(
+    *,
+    donation_id: str,
+    fee_option: str,
+    fee_policy_version: str,
+    stripe_balance_transaction_id: str | None,
+    stripe_processing_fee_cents: int,
+    platform_fee_percent: float,
+    platform_fee_cents: int,
+    donor_fee_cents: int,
+    platform_absorbed_fee_cents: int,
+    net_to_org_cents: int,
+) -> None:
+    sql = """
+      UPDATE donations
+      SET fee_option = %s,
+          fee_policy_version = %s,
+          stripe_balance_transaction_id = %s,
+          stripe_processing_fee_cents = %s,
+          platform_fee_percent = %s,
+          platform_fee_cents = %s,
+          donor_fee_cents = %s,
+          platform_absorbed_fee_cents = %s,
+          net_to_org_cents = %s,
+          updated_at = now()
+      WHERE id = %s
+    """
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            sql,
+            (
+                fee_option,
+                fee_policy_version,
+                stripe_balance_transaction_id,
+                int(stripe_processing_fee_cents),
+                float(platform_fee_percent),
+                int(platform_fee_cents),
+                int(donor_fee_cents),
+                int(platform_absorbed_fee_cents),
+                int(net_to_org_cents),
+                donation_id,
+            ),
+        )
+        conn.commit()
+
+
+def summarize_succeeded_donations(campaign_id: str) -> dict[str, int]:
+    sql = """
+      SELECT
+        COALESCE(SUM(amount_cents), 0)::int AS gross_raised_cents,
+        COALESCE(SUM(stripe_processing_fee_cents), 0)::int AS stripe_fee_cents,
+        COALESCE(SUM(platform_fee_cents), 0)::int AS platform_fee_cents,
+        COALESCE(SUM(donor_fee_cents), 0)::int AS donor_covered_fee_cents,
+        COALESCE(SUM(platform_absorbed_fee_cents), 0)::int AS platform_absorbed_fee_cents,
+        COALESCE(SUM(net_to_org_cents), 0)::int AS net_payout_cents
+      FROM donations
+      WHERE campaign_id = %s
+        AND status = 'succeeded'
+    """
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (campaign_id,))
+        row = cur.fetchone()
+        return {
+            "gross_raised_cents": int(row[0] or 0),
+            "stripe_fee_cents": int(row[1] or 0),
+            "platform_fee_cents": int(row[2] or 0),
+            "donor_covered_fee_cents": int(row[3] or 0),
+            "platform_absorbed_fee_cents": int(row[4] or 0),
+            "net_payout_cents": int(row[5] or 0),
+        }
 
 
 def attach_pi_to_donation(donation_id: str, pi_id: str) -> None:

@@ -9,6 +9,7 @@ import os
 
 from app.services.email_service import ensure_receipt_for_donation
 from app.services.ai_site_service import run_generation_job
+from app.services.settlement_service import execute_campaign_payout
 from app.utils.cache import REDIS_URL
 
 
@@ -69,7 +70,6 @@ def enqueue_ai_site_generation(job_id: str, campaign_id: str, prompt: str) -> bo
     if not use_queue:
         run_generation_job(job_id, campaign_id, prompt)
         return False
-
     try:
         from redis import Redis
         from rq import Queue, Retry
@@ -88,6 +88,34 @@ def enqueue_ai_site_generation(job_id: str, campaign_id: str, prompt: str) -> bo
         return True
     except Exception:
         run_generation_job(job_id, campaign_id, prompt)
+        return False
+
+
+def enqueue_campaign_payout(campaign_id: str) -> bool:
+    """
+    Enqueue payout execution for a completed campaign.
+    Returns True if queued, False if executed synchronously.
+    """
+    use_queue = os.getenv("USE_PAYOUT_QUEUE", "1") == "1"
+    if not use_queue:
+        execute_campaign_payout(campaign_id)
+        return False
+    try:
+        from redis import Redis
+        from rq import Queue, Retry
+
+        conn = Redis.from_url(REDIS_URL, decode_responses=False)
+        q = Queue("payouts", connection=conn)
+        q.enqueue(
+            execute_campaign_payout,
+            campaign_id,
+            job_timeout="5m",
+            retry=Retry(max=2, interval=[20, 60]),
+            failure_ttl=86400,
+        )
+        return True
+    except Exception:
+        execute_campaign_payout(campaign_id)
         return False
 
 

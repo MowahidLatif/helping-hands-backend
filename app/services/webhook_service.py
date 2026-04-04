@@ -8,8 +8,10 @@ from app.models.donation import (
     attach_pi_to_donation,
     set_status_by_id,
     get_donation,
+    update_donation_accounting,
 )
 from app.models.campaign import (
+    get_campaign,
     recompute_total_raised,
     record_platform_fee_if_goal_reached,
 )
@@ -18,9 +20,16 @@ from app.utils.public_campaign_cache import invalidate_public_campaign_cache
 from app.realtime import socketio
 from app.models.stripe_event import mark_event_processed
 from app.tasks import enqueue_receipt_email
+from app.services.fee_policy_service import (
+    build_donation_accounting,
+    estimate_stripe_processing_fee_cents,
+    normalize_fee_option,
+)
+from app.services.settlement_service import reconcile_payout_event
 
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "").strip()
 DEV_SKIP = os.getenv("DEV_STRIPE_NO_VERIFY") == "1"
+STRIPE_SECRET = os.getenv("STRIPE_SECRET_KEY", "").strip()
 
 
 def _mask_email(e: str | None) -> str | None:
@@ -84,6 +93,43 @@ def _find_donation(pi_id: str | None, donation_id: str | None) -> dict | None:
     return None
 
 
+def _extract_stripe_fee_from_obj(obj: dict | None) -> tuple[str | None, int]:
+    data = obj or {}
+    bt = data.get("balance_transaction")
+    if isinstance(bt, dict):
+        fee = bt.get("fee")
+        bt_id = bt.get("id")
+        if fee is not None:
+            return bt_id, int(fee)
+    if isinstance(bt, str):
+        if STRIPE_SECRET:
+            try:
+                import stripe
+
+                stripe.api_key = STRIPE_SECRET
+                row = stripe.BalanceTransaction.retrieve(bt)
+                return bt, int(row.get("fee") or 0)
+            except Exception:
+                return bt, 0
+        return bt, 0
+    if STRIPE_SECRET:
+        charge_id = data.get("latest_charge")
+        if isinstance(charge_id, str):
+            try:
+                import stripe
+
+                stripe.api_key = STRIPE_SECRET
+                charge = stripe.Charge.retrieve(
+                    charge_id, expand=["balance_transaction"]
+                )
+                balance_tx = charge.get("balance_transaction")
+                if isinstance(balance_tx, dict):
+                    return balance_tx.get("id"), int(balance_tx.get("fee") or 0)
+            except Exception:
+                pass
+    return None, 0
+
+
 def _resolve_event_context(
     obj: dict | None,
 ) -> tuple[str | None, str | None, str | None]:
@@ -110,6 +156,7 @@ def _apply_status_update(
     new_status: str,
     enqueue_receipt: bool = False,
     emit_socket: bool = False,
+    event_obj: dict | None = None,
 ) -> None:
     d = _find_donation(pi_id=pi_id, donation_id=donation_id)
     if d and pi_id and not d.get("stripe_payment_intent_id"):
@@ -127,6 +174,35 @@ def _apply_status_update(
             enqueue_receipt_email((d or {}).get("id"))
         except Exception as e:
             print("[email receipt error]", str(e))
+
+    if new_status == "succeeded" and d:
+        campaign = get_campaign((d or {}).get("campaign_id"))
+        if campaign:
+            fee_option = normalize_fee_option(campaign.get("fee_option"))
+            stripe_bt_id, stripe_fee_cents = _extract_stripe_fee_from_obj(event_obj)
+            if stripe_fee_cents <= 0:
+                stripe_fee_cents = estimate_stripe_processing_fee_cents(
+                    int((d or {}).get("amount_cents") or 0)
+                )
+            accounting = build_donation_accounting(
+                fee_option=fee_option,
+                campaign_total_dollars=float(campaign.get("total_raised") or 0)
+                + (int((d or {}).get("amount_cents") or 0) / 100.0),
+                amount_cents=int((d or {}).get("amount_cents") or 0),
+                stripe_processing_fee_cents=int(stripe_fee_cents),
+            )
+            update_donation_accounting(
+                donation_id=str(d["id"]),
+                fee_option=accounting.fee_option,
+                fee_policy_version=accounting.fee_policy_version,
+                stripe_balance_transaction_id=stripe_bt_id,
+                stripe_processing_fee_cents=accounting.stripe_processing_fee_cents,
+                platform_fee_percent=accounting.platform_fee_percent,
+                platform_fee_cents=accounting.platform_fee_cents,
+                donor_fee_cents=accounting.donor_fee_cents,
+                platform_absorbed_fee_cents=accounting.platform_absorbed_fee_cents,
+                net_to_org_cents=accounting.net_to_org_cents,
+            )
 
     cid = (d or {}).get("campaign_id") or campaign_id
     if not cid:
@@ -206,6 +282,7 @@ def process_stripe_event(
             new_status=new_status,
             enqueue_receipt=new_status == "succeeded",
             emit_socket=new_status == "succeeded",
+            event_obj=obj,
         )
         return 200, {"ok": True}
 
@@ -216,6 +293,7 @@ def process_stripe_event(
             donation_id=donation_id,
             campaign_id=campaign_id,
             new_status="refunded",
+            event_obj=obj,
         )
         return 200, {"ok": True}
 
@@ -239,7 +317,25 @@ def process_stripe_event(
             donation_id=donation_id,
             campaign_id=campaign_id,
             new_status=new_status,
+            event_obj=obj,
         )
+        return 200, {"ok": True}
+
+    if ev_type in {
+        "transfer.created",
+        "transfer.updated",
+        "transfer.paid",
+        "transfer.failed",
+        "transfer.reversed",
+        "payout.paid",
+        "payout.updated",
+        "payout.failed",
+        "payout.canceled",
+    }:
+        try:
+            reconcile_payout_event(ev_type, obj or {})
+        except Exception as e:
+            print("[payout reconcile error]", str(e))
         return 200, {"ok": True}
 
     return 200, {"ignored": ev_type or "unknown"}

@@ -27,6 +27,7 @@ from app.models.donation import (
     list_donations_paginated,
     recent_succeeded_for_campaign,
     select_donations_by_campaign,
+    summarize_succeeded_donations,
 )
 from app.models.media import list_media_for_campaign
 from app.services.giveaway_service import draw_winner_for_campaign
@@ -62,7 +63,19 @@ from app.models.campaign_task import (
 )
 from app.models.task_status import get_task_status
 from app.models.org_permissions import user_has_permission
-from app.tasks import enqueue_campaign_update_notifications, enqueue_ai_site_generation
+from app.tasks import (
+    enqueue_campaign_update_notifications,
+    enqueue_ai_site_generation,
+    enqueue_campaign_payout,
+)
+from app.services.fee_policy_service import (
+    FEE_OPTION_DONOR_PAYS,
+    FEE_OPTION_PLATFORM_ABSORBS,
+)
+from app.services.settlement_service import (
+    execute_campaign_payout,
+    get_campaign_finance_summary,
+)
 import csv
 import io
 
@@ -103,6 +116,12 @@ def create():
     status = body.get("status") or "draft"
     custom_domain = (body.get("custom_domain") or "").strip() or None
     giveaway_prize_cents = body.get("giveaway_prize_cents")
+    fee_option = (body.get("fee_option") or FEE_OPTION_DONOR_PAYS).strip().lower()
+    if fee_option not in {FEE_OPTION_DONOR_PAYS, FEE_OPTION_PLATFORM_ABSORBS}:
+        return (
+            jsonify({"error": "fee_option must be donor_pays or platform_absorbs"}),
+            400,
+        )
     if giveaway_prize_cents is not None:
         try:
             giveaway_prize_cents = int(giveaway_prize_cents)
@@ -122,6 +141,7 @@ def create():
             status=status,
             custom_domain=custom_domain,
             giveaway_prize_cents=giveaway_prize_cents,
+            fee_option=fee_option,
         )
         return jsonify(camp), 201
     except Exception as e:
@@ -173,6 +193,14 @@ def patch(campaign_id):
                     ),
                     400,
                 )
+    if "fee_option" in body:
+        fee_option = (body.get("fee_option") or "").strip().lower()
+        if fee_option not in {FEE_OPTION_DONOR_PAYS, FEE_OPTION_PLATFORM_ABSORBS}:
+            return (
+                jsonify({"error": "fee_option must be donor_pays or platform_absorbs"}),
+                400,
+            )
+        updates["fee_option"] = fee_option
 
     try:
         newrow = update_campaign(campaign_id, **updates)
@@ -229,11 +257,12 @@ def campaign_progress(campaign_id):
         "donations_count": count,
         "last_donation_at": last_dt,
     }
-    fee_cents = camp.get("platform_fee_cents")
-    if fee_cents is not None:
-        resp["platform_fee_cents"] = fee_cents
-        resp["platform_fee_percent"] = float(camp.get("platform_fee_percent") or 0)
-        resp["net_to_org_cents"] = int(total * 100) - int(fee_cents)
+    summary = summarize_succeeded_donations(campaign_id)
+    resp["fee_option"] = camp.get("fee_option") or FEE_OPTION_DONOR_PAYS
+    resp["fee_policy_version"] = camp.get("fee_policy_version") or "v1"
+    resp["platform_fee_cents"] = int(summary.get("platform_fee_cents") or 0)
+    resp["stripe_fee_cents"] = int(summary.get("stripe_fee_cents") or 0)
+    resp["net_to_org_cents"] = int(summary.get("net_payout_cents") or 0)
     r().setex(key, 30, json.dumps(resp, default=str))
     return jsonify(resp), 200
 
@@ -341,6 +370,12 @@ def export_donations_csv(campaign_id):
             "currency",
             "donor_email",
             "status",
+            "fee_option",
+            "stripe_processing_fee_cents",
+            "platform_fee_cents",
+            "donor_fee_cents",
+            "platform_absorbed_fee_cents",
+            "net_to_org_cents",
             "created_at",
         ]
     )
@@ -355,6 +390,12 @@ def export_donations_csv(campaign_id):
                 row.get("currency") or "usd",
                 row.get("donor_email"),
                 row.get("status"),
+                row.get("fee_option"),
+                row.get("stripe_processing_fee_cents"),
+                row.get("platform_fee_cents"),
+                row.get("donor_fee_cents"),
+                row.get("platform_absorbed_fee_cents"),
+                row.get("net_to_org_cents"),
                 created_at,
             ]
         )
@@ -396,6 +437,35 @@ def list_stripe_events(campaign_id):
             ),
             200,
         )
+
+
+@campaigns.get("/<campaign_id>/finance")
+@jwt_required()
+def campaign_finance(campaign_id):
+    camp = get_campaign(campaign_id)
+    if not camp:
+        return jsonify({"error": "not found"}), 404
+    role = get_user_role_in_org(get_jwt_identity(), camp["org_id"])
+    if role not in ("owner", "admin"):
+        return jsonify({"error": "forbidden"}), 403
+    return jsonify(get_campaign_finance_summary(campaign_id)), 200
+
+
+@campaigns.post("/<campaign_id>/settle-and-payout")
+@jwt_required()
+def settle_and_payout(campaign_id):
+    camp = get_campaign(campaign_id)
+    if not camp:
+        return jsonify({"error": "not found"}), 404
+    role = get_user_role_in_org(get_jwt_identity(), camp["org_id"])
+    if role not in ("owner", "admin"):
+        return jsonify({"error": "forbidden"}), 403
+    run_async = (request.args.get("async", "1") or "1").strip() != "0"
+    if run_async:
+        queued = enqueue_campaign_payout(campaign_id)
+        return jsonify({"queued": bool(queued), "campaign_id": campaign_id}), 202
+    result = execute_campaign_payout(campaign_id)
+    return jsonify(result), (200 if not result.get("error") else 400)
 
 
 @campaigns.get("/<campaign_id>/receipts")

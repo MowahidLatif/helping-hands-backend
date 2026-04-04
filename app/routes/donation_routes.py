@@ -34,6 +34,12 @@ def get_one(donation_id):
                 "donor": _mask_email(d.get("donor_email")),
                 "message": d.get("message"),
                 "status": d["status"],
+                "fee_option": d.get("fee_option"),
+                "stripe_processing_fee_cents": d.get("stripe_processing_fee_cents"),
+                "platform_fee_cents": d.get("platform_fee_cents"),
+                "donor_fee_cents": d.get("donor_fee_cents"),
+                "platform_absorbed_fee_cents": d.get("platform_absorbed_fee_cents"),
+                "net_to_org_cents": d.get("net_to_org_cents"),
                 "created_at": (
                     d.get("created_at").isoformat() if d.get("created_at") else None
                 ),
