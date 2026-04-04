@@ -13,13 +13,14 @@ from app.models.donation import (
 from app.models.campaign import (
     get_campaign,
     recompute_total_raised,
+    complete_campaign_if_goal_reached,
     record_platform_fee_if_goal_reached,
 )
 from app.utils.cache import r
 from app.utils.public_campaign_cache import invalidate_public_campaign_cache
 from app.realtime import socketio
 from app.models.stripe_event import mark_event_processed
-from app.tasks import enqueue_receipt_email
+from app.tasks import enqueue_receipt_email, enqueue_campaign_payout
 from app.services.fee_policy_service import (
     build_donation_accounting,
     estimate_stripe_processing_fee_cents,
@@ -181,8 +182,16 @@ def _apply_status_update(
             fee_option = normalize_fee_option(campaign.get("fee_option"))
             stripe_bt_id, stripe_fee_cents = _extract_stripe_fee_from_obj(event_obj)
             if stripe_fee_cents <= 0:
+                metadata = (event_obj or {}).get("metadata") or {}
+                try:
+                    charge_amount_cents = int(
+                        metadata.get("charge_amount_cents")
+                        or int((d or {}).get("amount_cents") or 0)
+                    )
+                except Exception:
+                    charge_amount_cents = int((d or {}).get("amount_cents") or 0)
                 stripe_fee_cents = estimate_stripe_processing_fee_cents(
-                    int((d or {}).get("amount_cents") or 0)
+                    charge_amount_cents
                 )
             accounting = build_donation_accounting(
                 fee_option=fee_option,
@@ -221,6 +230,12 @@ def _apply_status_update(
             record_platform_fee_if_goal_reached(cid)
         except Exception as fee_err:
             print("[platform fee error]", str(fee_err))
+        try:
+            completed_now = complete_campaign_if_goal_reached(cid)
+            if completed_now:
+                enqueue_campaign_payout(cid)
+        except Exception as completion_err:
+            print("[campaign complete/payout error]", str(completion_err))
 
     if emit_socket and new_status == "succeeded":
         amount_cents = int((d or {}).get("amount_cents") or 0)

@@ -12,6 +12,7 @@ from app.models.campaign import (
     delete_campaign,
     list_giveaway_logs,
     is_fee_option_locked,
+    VALID_CAMPAIGN_STATUSES,
 )
 from app.models.ai_generation_job import create_job, get_job
 from app.services.platform_ai_payment import (
@@ -115,7 +116,10 @@ def create():
     if not user_has_permission(user_id, org_id, "campaign:create", role):
         return jsonify({"error": "forbidden: campaign:create required"}), 403
     goal = float(body.get("goal") or 0)
-    status = body.get("status") or "draft"
+    status = (body.get("status") or "draft").strip().lower()
+    if status not in VALID_CAMPAIGN_STATUSES:
+        valid = ", ".join(sorted(VALID_CAMPAIGN_STATUSES))
+        return jsonify({"error": f"status must be one of: {valid}"}), 400
     custom_domain = (body.get("custom_domain") or "").strip() or None
     giveaway_prize_cents = body.get("giveaway_prize_cents")
     fee_option = (body.get("fee_option") or FEE_OPTION_DONOR_PAYS).strip().lower()
@@ -171,7 +175,11 @@ def patch(campaign_id):
     if "goal" in body:
         updates["goal"] = float(body["goal"])
     if "status" in body:
-        updates["status"] = body["status"]
+        status = (body.get("status") or "").strip().lower()
+        if status not in VALID_CAMPAIGN_STATUSES:
+            valid = ", ".join(sorted(VALID_CAMPAIGN_STATUSES))
+            return jsonify({"error": f"status must be one of: {valid}"}), 400
+        updates["status"] = status
     if "slug" in body:
         updates["slug"] = slugify(body["slug"])
     if "custom_domain" in body:

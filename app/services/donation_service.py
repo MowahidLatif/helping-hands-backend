@@ -8,7 +8,9 @@ from app.models.donation import create_donation, set_payment_intent
 from app.services.fee_policy_service import (
     FEE_POLICY_VERSION,
     build_donation_accounting,
+    compute_gross_charge_for_donor_cover,
     estimate_stripe_processing_fee_cents,
+    FEE_OPTION_DONOR_PAYS,
     normalize_fee_option,
 )
 
@@ -30,25 +32,37 @@ def start_checkout(
     camp = get_campaign(campaign_id)
     if not camp:
         return {"error": "campaign not found"}
+    campaign_status = (camp.get("status") or "").strip().lower()
+    if campaign_status != "active":
+        return {"error": "campaign is not accepting donations"}
+    campaign_goal = float(camp.get("goal") or 0)
+    campaign_total = float(camp.get("total_raised") or 0)
+    if campaign_goal > 0 and campaign_total >= campaign_goal:
+        return {"error": "campaign goal has been reached"}
 
-    amount_cents = _to_cents(amount)
-    if amount_cents <= 0:
+    base_amount_cents = _to_cents(amount)
+    if base_amount_cents <= 0:
         return {"error": "amount must be > 0"}
+
+    fee_option = normalize_fee_option(camp.get("fee_option"))
+    charge_amount_cents = base_amount_cents
+    if fee_option == FEE_OPTION_DONOR_PAYS:
+        charge_amount_cents = compute_gross_charge_for_donor_cover(base_amount_cents)
+    donor_cover_amount_cents = max(0, charge_amount_cents - base_amount_cents)
 
     donation = create_donation(
         org_id=camp["org_id"],
         campaign_id=campaign_id,
-        amount_cents=amount_cents,
+        amount_cents=base_amount_cents,
         currency=CURRENCY,
         donor_email=(donor_email or None),
         message=(message or None),
     )
-    fee_option = normalize_fee_option(camp.get("fee_option"))
-    stripe_fee_estimate = estimate_stripe_processing_fee_cents(amount_cents)
+    stripe_fee_estimate = estimate_stripe_processing_fee_cents(charge_amount_cents)
     checkout_accounting = build_donation_accounting(
         fee_option=fee_option,
         campaign_total_dollars=float(camp.get("total_raised") or 0),
-        amount_cents=amount_cents,
+        amount_cents=base_amount_cents,
         stripe_processing_fee_cents=stripe_fee_estimate,
     )
 
@@ -61,6 +75,9 @@ def start_checkout(
             "clientSecret": fake_cs,
             "dev_mode": True,
             "fee_option": fee_option,
+            "base_amount_cents": base_amount_cents,
+            "charge_amount_cents": charge_amount_cents,
+            "donor_cover_amount_cents": donor_cover_amount_cents,
             "fee_preview": {
                 "platform_fee_percent": checkout_accounting.platform_fee_percent,
                 "platform_fee_cents": checkout_accounting.platform_fee_cents,
@@ -71,7 +88,7 @@ def start_checkout(
 
     stripe.api_key = STRIPE_SECRET
     pi_payload: Dict[str, Any] = {
-        "amount": amount_cents,
+        "amount": charge_amount_cents,
         "currency": CURRENCY,
         "metadata": {
             "donation_id": donation["id"],
@@ -79,6 +96,9 @@ def start_checkout(
             "org_id": camp["org_id"],
             "fee_option": fee_option,
             "fee_policy_version": camp.get("fee_policy_version") or FEE_POLICY_VERSION,
+            "base_amount_cents": str(base_amount_cents),
+            "charge_amount_cents": str(charge_amount_cents),
+            "donor_cover_amount_cents": str(donor_cover_amount_cents),
         },
         "idempotency_key": donation["id"],
         "automatic_payment_methods": {"enabled": True},
@@ -91,6 +111,9 @@ def start_checkout(
         "donation_id": donation["id"],
         "clientSecret": pi.client_secret,
         "fee_option": fee_option,
+        "base_amount_cents": base_amount_cents,
+        "charge_amount_cents": charge_amount_cents,
+        "donor_cover_amount_cents": donor_cover_amount_cents,
         "fee_preview": {
             "platform_fee_percent": checkout_accounting.platform_fee_percent,
             "platform_fee_cents": checkout_accounting.platform_fee_cents,

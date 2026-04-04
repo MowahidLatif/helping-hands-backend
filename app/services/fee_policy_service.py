@@ -58,6 +58,19 @@ def estimate_stripe_processing_fee_cents(amount_cents: int) -> int:
     return int(round(gross * (_STRIPE_PCT_DEFAULT / 100.0))) + _STRIPE_FIXED_DEFAULT
 
 
+def compute_gross_charge_for_donor_cover(amount_cents: int) -> int:
+    """
+    Compute an estimated gross charge so that net after Stripe fees
+    is at least the intended base donation amount.
+    """
+    base = max(0, int(amount_cents))
+    if base <= 0:
+        return 0
+    pct = max(0.0, min(_STRIPE_PCT_DEFAULT / 100.0, 0.99))
+    gross = int(round((base + _STRIPE_FIXED_DEFAULT) / (1.0 - pct)))
+    return max(base, gross)
+
+
 def build_donation_accounting(
     *,
     fee_option: str,

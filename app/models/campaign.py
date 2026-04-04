@@ -2,6 +2,8 @@ from app.utils.db import get_db_connection
 from typing import Any
 from app.utils.slug import slugify, slugify_with_fallback
 
+VALID_CAMPAIGN_STATUSES = {"draft", "active", "paused", "completed", "archived"}
+
 
 def is_fee_option_locked(status: str | None) -> bool:
     return (status or "").lower() != "draft"
@@ -110,6 +112,7 @@ def create_campaign(
     fee_policy_version: str = "v1",
 ) -> dict[str, Any]:
     slug = unique_slug_for_org(org_id, title)
+    normalized_status = (status or "draft").strip().lower()
     sql = """
     INSERT INTO campaigns (
       org_id, title, slug, goal, status, custom_domain, giveaway_prize_cents, fee_option, fee_policy_version
@@ -126,7 +129,7 @@ def create_campaign(
                 title,
                 slug,
                 goal,
-                status,
+                normalized_status,
                 custom_domain,
                 giveaway_prize_cents,
                 fee_option,
@@ -242,8 +245,7 @@ def list_campaigns(
     """
     params: list[Any] = [org_id]
     if status:
-        valid = ("draft", "active", "paused", "completed", "archived")
-        if status.lower() in valid:
+        if status.lower() in VALID_CAMPAIGN_STATUSES:
             sql += " AND status = %s"
             params.append(status.lower())
     sql += " ORDER BY created_at DESC"
@@ -335,7 +337,7 @@ def update_campaign(
         params.append(goal)
     if status is not None:
         sets.append("status = %s")
-        params.append(status)
+        params.append((status or "").strip().lower())
     if slug is not None:
         sets.append("slug = %s")
         params.append(slugify(slug))
@@ -419,6 +421,26 @@ def recompute_total_raised(campaign_id: str) -> dict[str, Any]:
         row = cur.fetchone()
         conn.commit()
         return {"total_raised": row[0]}
+
+
+def complete_campaign_if_goal_reached(campaign_id: str) -> bool:
+    """
+    Mark campaign as completed when active campaign reaches goal.
+    Returns True only when a transition active -> completed occurred.
+    """
+    sql = """
+    UPDATE campaigns
+    SET status = 'completed',
+        updated_at = now()
+    WHERE id = %s
+      AND status = 'active'
+      AND goal > 0
+      AND total_raised >= goal
+    """
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (campaign_id,))
+        conn.commit()
+        return cur.rowcount > 0
 
 
 def get_goal_and_total(campaign_id: str) -> tuple[float, float] | None:
