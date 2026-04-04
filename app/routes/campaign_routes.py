@@ -13,12 +13,10 @@ from app.models.campaign import (
     list_giveaway_logs,
 )
 from app.models.ai_generation_job import create_job, get_job
-from app.services.ai_site_service import run_generation_in_background
 from app.services.platform_ai_payment import (
     require_payment_for_ai,
     verify_ai_generation_payment,
 )
-from flask import current_app
 from app.utils.slug import slugify
 from app.utils.domain import validate_custom_domain
 from app.utils.page_layout import validate_layout
@@ -64,7 +62,7 @@ from app.models.campaign_task import (
 )
 from app.models.task_status import get_task_status
 from app.models.org_permissions import user_has_permission
-from app.tasks import enqueue_campaign_update_notifications
+from app.tasks import enqueue_campaign_update_notifications, enqueue_ai_site_generation
 import csv
 import io
 
@@ -847,12 +845,7 @@ def ai_site_generate(campaign_id):
             return jsonify({"error": pay_err}), 402
 
     job = create_job(campaign_id=campaign_id, created_by_user_id=str(user_id))
-    run_generation_in_background(
-        current_app._get_current_object(),
-        str(job["id"]),
-        campaign_id,
-        prompt,
-    )
+    enqueue_ai_site_generation(str(job["id"]), campaign_id, prompt)
     return jsonify({"job": _serialize_job(job)}), 202
 
 

@@ -8,7 +8,6 @@ import json
 import logging
 import os
 import re
-import threading
 import urllib.error
 import urllib.request
 from typing import Any
@@ -186,51 +185,45 @@ def generate_and_validate_recipe(
     return recipe
 
 
-def run_generation_in_background(
-    app: Any,
+def run_generation_job(
     job_id: str,
     campaign_id: str,
     user_prompt: str,
 ) -> None:
-    def _work() -> None:
-        with app.app_context():
-            try:
-                update_job(
-                    job_id,
-                    status="running",
-                    step="Analyzing assets and prompt",
-                    progress_percent=15,
-                )
-                update_job(
-                    job_id,
-                    step="Calling AI model",
-                    progress_percent=40,
-                )
-                recipe = generate_and_validate_recipe(
-                    user_prompt=user_prompt,
-                    campaign_id=campaign_id,
-                )
-                update_job(
-                    job_id,
-                    step="Saving site recipe",
-                    progress_percent=85,
-                )
-                set_ai_site_recipe(campaign_id, recipe)
-                update_job(
-                    job_id,
-                    status="completed",
-                    step="Done",
-                    progress_percent=100,
-                    error_message=None,
-                )
-            except Exception as e:
-                msg = str(e)[:2000]
-                update_job(
-                    job_id,
-                    status="failed",
-                    step="Failed",
-                    error_message=msg,
-                )
-
-    t = threading.Thread(target=_work, daemon=True)
-    t.start()
+    try:
+        update_job(
+            job_id,
+            status="running",
+            step="Analyzing assets and prompt",
+            progress_percent=15,
+        )
+        update_job(
+            job_id,
+            step="Calling AI model",
+            progress_percent=40,
+        )
+        recipe = generate_and_validate_recipe(
+            user_prompt=user_prompt,
+            campaign_id=campaign_id,
+        )
+        update_job(
+            job_id,
+            step="Saving site recipe",
+            progress_percent=85,
+        )
+        set_ai_site_recipe(campaign_id, recipe)
+        update_job(
+            job_id,
+            status="completed",
+            step="Done",
+            progress_percent=100,
+            error_message=None,
+        )
+    except Exception as e:
+        msg = str(e)[:2000]
+        update_job(
+            job_id,
+            status="failed",
+            step="Failed",
+            error_message=msg,
+        )

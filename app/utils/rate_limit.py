@@ -1,5 +1,5 @@
 """
-Simple in-memory rate limiter middleware.
+Redis-backed rate limiter with in-memory fallback.
 
 Configure via RATE_LIMIT_ENABLED (default: 1) and RATE_LIMIT_PER_MINUTE (default: 200).
 Auth endpoints use RATE_LIMIT_AUTH_PER_MINUTE (default: 10).
@@ -8,8 +8,10 @@ Auth endpoints use RATE_LIMIT_AUTH_PER_MINUTE (default: 10).
 from __future__ import annotations
 import os
 import time
+import uuid
 from collections import defaultdict
 from threading import Lock
+from app.utils.cache import r
 
 _lock = Lock()
 _counts: dict[str, list[float]] = defaultdict(list)
@@ -25,16 +27,39 @@ def _clean_old(ts_list: list[float], window: int) -> None:
 
 def is_rate_limited(key: str, limit: int, window_seconds: int | None = None) -> bool:
     """Return True if the key has exceeded the limit within the window.
-    Uses default 60s window unless window_seconds is set (e.g. 3600 for per-hour)."""
+    Uses default 60s window unless window_seconds is set (e.g. 3600 for per-hour).
+
+    Primary backend: Redis sorted sets (shared across instances).
+    Fallback backend: in-memory list (single process only).
+    """
     if limit <= 0:
         return False
     window = window_seconds if window_seconds is not None else _window
-    with _lock:
-        _clean_old(_counts[key], window)
-        if len(_counts[key]) >= limit:
+    now = time.time()
+
+    try:
+        client = r()
+        now_ms = int(now * 1000)
+        cutoff_ms = int((now - window) * 1000)
+        redis_key = f"ratelimit:{key}:{window}"
+
+        client.zremrangebyscore(redis_key, 0, cutoff_ms)
+        current_count = int(client.zcard(redis_key))
+        if current_count >= limit:
             return True
-        _counts[key].append(time.time())
+
+        member = f"{now_ms}:{uuid.uuid4().hex}"
+        client.zadd(redis_key, {member: now_ms})
+        client.expire(redis_key, window + 5)
         return False
+    except Exception:
+        # Redis unavailable: degrade to process-local limiter to preserve protection.
+        with _lock:
+            _clean_old(_counts[key], window)
+            if len(_counts[key]) >= limit:
+                return True
+            _counts[key].append(now)
+            return False
 
 
 def rate_limit_key() -> str:

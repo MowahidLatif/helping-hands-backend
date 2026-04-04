@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 
 from app.services.email_service import ensure_receipt_for_donation
+from app.services.ai_site_service import run_generation_job
 from app.utils.cache import REDIS_URL
 
 
@@ -56,6 +57,37 @@ def enqueue_campaign_update_notifications(campaign_id: str, update_id: str) -> b
         return True
     except Exception:
         send_campaign_update_notifications(campaign_id, update_id)
+        return False
+
+
+def enqueue_ai_site_generation(job_id: str, campaign_id: str, prompt: str) -> bool:
+    """
+    Enqueue AI generation job with retries.
+    Returns True if enqueued, False if queue unavailable and run synchronously.
+    """
+    use_queue = os.getenv("USE_AI_GENERATION_QUEUE", "1") == "1"
+    if not use_queue:
+        run_generation_job(job_id, campaign_id, prompt)
+        return False
+
+    try:
+        from redis import Redis
+        from rq import Queue, Retry
+
+        conn = Redis.from_url(REDIS_URL, decode_responses=False)
+        q = Queue("ai_generation", connection=conn)
+        q.enqueue(
+            run_generation_job,
+            job_id,
+            campaign_id,
+            prompt,
+            job_timeout="10m",
+            retry=Retry(max=2, interval=[15, 45]),
+            failure_ttl=86400,
+        )
+        return True
+    except Exception:
+        run_generation_job(job_id, campaign_id, prompt)
         return False
 
 

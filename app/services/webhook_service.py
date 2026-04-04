@@ -74,6 +74,97 @@ def _extract_event(
     return ev_type, obj, wrapped
 
 
+def _find_donation(pi_id: str | None, donation_id: str | None) -> dict | None:
+    if donation_id:
+        d = get_donation(donation_id)
+        if d:
+            return d
+    if pi_id:
+        return get_donation_by_pi(pi_id)
+    return None
+
+
+def _resolve_event_context(
+    obj: dict | None,
+) -> tuple[str | None, str | None, str | None]:
+    data = obj or {}
+    metadata = data.get("metadata") or {}
+
+    donation_id = metadata.get("donation_id")
+    campaign_id = metadata.get("campaign_id")
+
+    pi_id = data.get("id") if str(data.get("id", "")).startswith("pi_") else None
+    if not pi_id:
+        maybe_pi = data.get("payment_intent")
+        if isinstance(maybe_pi, str) and maybe_pi.startswith("pi_"):
+            pi_id = maybe_pi
+
+    return pi_id, donation_id, campaign_id
+
+
+def _apply_status_update(
+    *,
+    pi_id: str | None,
+    donation_id: str | None,
+    campaign_id: str | None,
+    new_status: str,
+    enqueue_receipt: bool = False,
+    emit_socket: bool = False,
+) -> None:
+    d = _find_donation(pi_id=pi_id, donation_id=donation_id)
+    if d and pi_id and not d.get("stripe_payment_intent_id"):
+        attach_pi_to_donation(d["id"], pi_id)
+
+    if d and d.get("stripe_payment_intent_id"):
+        set_status_by_pi(d["stripe_payment_intent_id"], new_status)
+        d = get_donation(d["id"])
+    elif donation_id:
+        set_status_by_id(donation_id, new_status)
+        d = get_donation(donation_id)
+
+    if enqueue_receipt and (d or {}).get("id"):
+        try:
+            enqueue_receipt_email((d or {}).get("id"))
+        except Exception as e:
+            print("[email receipt error]", str(e))
+
+    cid = (d or {}).get("campaign_id") or campaign_id
+    if not cid:
+        return
+
+    totals = recompute_total_raised(cid)
+    try:
+        r().delete(f"campaign:{cid}:progress:v1")
+    except Exception as e:
+        print(f"[error] redis cache bust campaign:{cid}: {e}", flush=True)
+    invalidate_public_campaign_cache(str(cid))
+
+    if new_status == "succeeded":
+        try:
+            record_platform_fee_if_goal_reached(cid)
+        except Exception as fee_err:
+            print("[platform fee error]", str(fee_err))
+
+    if emit_socket and new_status == "succeeded":
+        amount_cents = int((d or {}).get("amount_cents") or 0)
+        donor_email = (d or {}).get("donor_email")
+        payload_out = {
+            "campaign_id": cid,
+            "amount_cents": amount_cents,
+            "amount": round(amount_cents / 100.0, 2),
+            "donor": _mask_email(donor_email),
+            "total_raised": float(totals["total_raised"]),
+            "currency": (d or {}).get("currency", "usd"),
+        }
+        try:
+            socketio.emit("donation", payload_out, to=f"campaign:{cid}")
+        except Exception as e:
+            print(
+                f"[error] socketio emit donation campaign:{cid}: {e}",
+                flush=True,
+            )
+
+
 def process_stripe_event(
     payload: bytes, sig_header: str | None
 ) -> Tuple[int, Dict[str, Any]]:
@@ -97,76 +188,58 @@ def process_stripe_event(
     if not inserted:
         return 200, {"ok": True, "duplicate": True}
 
-    if ev_type in (
+    if ev_type in {
         "payment_intent.succeeded",
         "payment_intent.payment_failed",
         "payment_intent.canceled",
-    ):
-        obj = obj or {}
-        pi_id = obj.get("id")
-        metadata = obj.get("metadata") or {}
-        donation_id = metadata.get("donation_id")
-        campaign_id = metadata.get("campaign_id")
-
-        d = None
-        if donation_id:
-            d = get_donation(donation_id)
-            if d and not d.get("stripe_payment_intent_id") and pi_id:
-                attach_pi_to_donation(donation_id, pi_id)
-
+    }:
+        pi_id, donation_id, campaign_id = _resolve_event_context(obj)
         new_status = (
             "succeeded"
             if ev_type == "payment_intent.succeeded"
             else "canceled" if ev_type == "payment_intent.canceled" else "failed"
         )
+        _apply_status_update(
+            pi_id=pi_id,
+            donation_id=donation_id,
+            campaign_id=campaign_id,
+            new_status=new_status,
+            enqueue_receipt=new_status == "succeeded",
+            emit_socket=new_status == "succeeded",
+        )
+        return 200, {"ok": True}
 
-        d_by_pi = get_donation_by_pi(pi_id) if pi_id else None
-        if d_by_pi and pi_id:
-            set_status_by_pi(pi_id, new_status)
-            d = d_by_pi
-        elif donation_id:
-            set_status_by_id(donation_id, new_status)
-            d = get_donation(donation_id)  # refresh
+    if ev_type == "charge.refunded":
+        pi_id, donation_id, campaign_id = _resolve_event_context(obj)
+        _apply_status_update(
+            pi_id=pi_id,
+            donation_id=donation_id,
+            campaign_id=campaign_id,
+            new_status="refunded",
+        )
+        return 200, {"ok": True}
 
-        if new_status == "succeeded":
-            try:
-                enqueue_receipt_email((d or {}).get("id") or donation_id)
-            except Exception as e:
-                print("[email receipt error]", str(e))
-
-        cid = (d or {}).get("campaign_id") or campaign_id
-        if cid:
-            totals = recompute_total_raised(cid)
-            try:
-                r().delete(f"campaign:{cid}:progress:v1")
-            except Exception as e:
-                print(f"[error] redis cache bust campaign:{cid}: {e}", flush=True)
-            invalidate_public_campaign_cache(str(cid))
-            if new_status == "succeeded":
-                try:
-                    record_platform_fee_if_goal_reached(cid)
-                except Exception as fee_err:
-                    print("[platform fee error]", str(fee_err))
-
-            if new_status == "succeeded":
-                amount_cents = int((d or {}).get("amount_cents") or 0)
-                donor_email = (d or {}).get("donor_email")
-                payload_out = {
-                    "campaign_id": cid,
-                    "amount_cents": amount_cents,
-                    "amount": round(amount_cents / 100.0, 2),
-                    "donor": _mask_email(donor_email),
-                    "total_raised": float(totals["total_raised"]),
-                    "currency": (d or {}).get("currency", "usd"),
-                }
-                try:
-                    socketio.emit("donation", payload_out, to=f"campaign:{cid}")
-                except Exception as e:
-                    print(
-                        f"[error] socketio emit donation campaign:{cid}: {e}",
-                        flush=True,
-                    )
-
+    if ev_type in {
+        "charge.dispute.created",
+        "charge.dispute.updated",
+        "charge.dispute.funds_withdrawn",
+        "charge.dispute.funds_reinstated",
+        "charge.dispute.closed",
+    }:
+        pi_id, donation_id, campaign_id = _resolve_event_context(obj)
+        dispute_status = ((obj or {}).get("status") or "").lower()
+        if ev_type in {"charge.dispute.funds_reinstated"}:
+            new_status = "succeeded"
+        elif ev_type == "charge.dispute.closed" and dispute_status == "won":
+            new_status = "succeeded"
+        else:
+            new_status = "refunded"
+        _apply_status_update(
+            pi_id=pi_id,
+            donation_id=donation_id,
+            campaign_id=campaign_id,
+            new_status=new_status,
+        )
         return 200, {"ok": True}
 
     return 200, {"ignored": ev_type or "unknown"}
