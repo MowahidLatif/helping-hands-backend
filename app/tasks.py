@@ -8,12 +8,12 @@ from __future__ import annotations
 import logging
 import os
 
-logger = logging.getLogger(__name__)
-
 from app.services.email_service import ensure_receipt_for_donation
 from app.services.ai_site_service import run_generation_job
 from app.services.settlement_service import execute_campaign_payout
 from app.utils.cache import REDIS_URL
+
+logger = logging.getLogger(__name__)
 
 
 def enqueue_receipt_email(donation_id: str) -> bool:
