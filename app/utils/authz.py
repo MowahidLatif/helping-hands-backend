@@ -8,14 +8,12 @@ def require_org_role(*allowed):
     def deco(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
-            auth_header = request.headers.get("Authorization")
-            if not auth_header:
-                return jsonify({"error": "Missing Authorization header"}), 401
-
+            # verify_jwt_in_request() honours JWT_TOKEN_LOCATION (cookies + headers),
+            # so both HttpOnly-cookie and Bearer-header clients work correctly.
             try:
                 verify_jwt_in_request()
             except Exception:
-                return jsonify({"error": "Invalid token"}), 401
+                return jsonify({"error": "Invalid or missing token"}), 401
 
             user_id = get_jwt_identity()
             jwt_claims = get_jwt()

@@ -76,7 +76,11 @@ def logout():
 @jwt_required(refresh=True)
 def refresh():
     user_id = get_jwt_identity()
-    new_access = create_access_token(identity=user_id)
+    old_claims = get_jwt()
+    # Preserve org_id and role so authorization context survives token rotation.
+    # Exclude pre_2fa — a refreshed token is always fully authenticated.
+    forwarded = {k: old_claims[k] for k in ("org_id", "role") if k in old_claims}
+    new_access = create_access_token(identity=user_id, additional_claims=forwarded)
     response = make_response(jsonify({"access_token": new_access}), 200)
     set_access_cookies(response, new_access)
     return response
