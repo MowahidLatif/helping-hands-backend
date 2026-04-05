@@ -5,7 +5,10 @@ Run worker: poetry run rq worker -u $REDIS_URL --with-scheduler
 """
 
 from __future__ import annotations
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 from app.services.email_service import ensure_receipt_for_donation
 from app.services.ai_site_service import run_generation_job
@@ -152,4 +155,4 @@ def send_campaign_update_notifications(campaign_id: str, update_id: str) -> None
                 from_name=from_name,
             )
         except Exception as e:
-            print(f"[error] send campaign update email to {to_addr}: {e}", flush=True)
+            logger.error("send campaign update email to %s: %s", to_addr, e)

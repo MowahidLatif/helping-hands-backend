@@ -1,7 +1,9 @@
+import logging
 from flask import Blueprint, request, jsonify
 from app.services.webhook_service import process_stripe_event
 
 webhooks_bp = Blueprint("webhooks", __name__)
+logger = logging.getLogger(__name__)
 
 
 @webhooks_bp.post("/webhooks/stripe")
@@ -13,5 +15,5 @@ def stripe_webhook():
         )
         return jsonify(resp), status
     except Exception as e:
-        print(f"[webhook error] {e}")
+        logger.error("stripe webhook error: %s", e)
         return jsonify({"error": "bad payload"}), 400

@@ -4,11 +4,21 @@ import re
 import boto3
 from botocore.client import Config
 
+_is_prod = (os.getenv("APP_ENV") or os.getenv("FLASK_ENV") or "development").lower() in {
+    "prod",
+    "production",
+}
+
 S3_ENDPOINT = os.getenv("S3_ENDPOINT", "http://127.0.0.1:9000")
 S3_REGION = os.getenv("S3_REGION", "us-east-1")
-S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY", "minioadmin")
-S3_SECRET_KEY = os.getenv("S3_SECRET_KEY", "minioadmin")
+S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY") or (None if _is_prod else "minioadmin")
+S3_SECRET_KEY = os.getenv("S3_SECRET_KEY") or (None if _is_prod else "minioadmin")
 S3_BUCKET = os.getenv("S3_BUCKET", "media-dev")
+
+if _is_prod and not S3_ACCESS_KEY:
+    raise RuntimeError("S3_ACCESS_KEY must be set in production")
+if _is_prod and not S3_SECRET_KEY:
+    raise RuntimeError("S3_SECRET_KEY must be set in production")
 USE_PATH = os.getenv("S3_USE_PATH_STYLE", "true").lower() == "true"
 
 

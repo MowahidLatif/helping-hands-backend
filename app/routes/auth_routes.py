@@ -1,9 +1,12 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, make_response
 from flask_jwt_extended import (
     jwt_required,
     get_jwt_identity,
     get_jwt,
     create_access_token,
+    set_access_cookies,
+    set_refresh_cookies,
+    unset_jwt_cookies,
 )
 from app.services.auth_service import (
     login_user,
@@ -30,12 +33,24 @@ def _reject_pre_2fa():
     return None
 
 
+def _set_auth_cookies(response, resp: dict) -> None:
+    """Set HttpOnly access and refresh token cookies on the response."""
+    if "access_token" in resp:
+        set_access_cookies(response, resp["access_token"])
+    if "refresh_token" in resp:
+        set_refresh_cookies(response, resp["refresh_token"])
+
+
 @auth_bp.post("/register")
 @rate_limit_decorator(_auth_limit, "auth")
 def register():
     data = request.get_json(force=True, silent=True) or {}
     resp = signup_user(data)
-    return jsonify(resp), (201 if "access_token" in resp else 400)
+    if "access_token" not in resp:
+        return jsonify(resp), 400
+    response = make_response(jsonify(resp), 201)
+    _set_auth_cookies(response, resp)
+    return response
 
 
 @auth_bp.post("/login")
@@ -45,7 +60,16 @@ def login():
     resp = login_user(data)
     if "error" in resp:
         return jsonify(resp), 401
-    return jsonify(resp), 200
+    response = make_response(jsonify(resp), 200)
+    _set_auth_cookies(response, resp)
+    return response
+
+
+@auth_bp.post("/logout")
+def logout():
+    response = make_response(jsonify({"ok": True}), 200)
+    unset_jwt_cookies(response)
+    return response
 
 
 @auth_bp.post("/refresh")
@@ -53,7 +77,9 @@ def login():
 def refresh():
     user_id = get_jwt_identity()
     new_access = create_access_token(identity=user_id)
-    return jsonify({"access_token": new_access}), 200
+    response = make_response(jsonify({"access_token": new_access}), 200)
+    set_access_cookies(response, new_access)
+    return response
 
 
 @auth_bp.post("/change-password")
@@ -176,4 +202,6 @@ def twofa_confirm_login():
     result = confirm_2fa_login(temp_token, code)
     if "error" in result:
         return jsonify({"error": result["error"]}), 401
-    return jsonify(result), 200
+    response = make_response(jsonify(result), 200)
+    _set_auth_cookies(response, result)
+    return response

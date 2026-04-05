@@ -20,8 +20,6 @@ def require_org_role(*allowed):
             user_id = get_jwt_identity()
             jwt_claims = get_jwt()
 
-            print(f"[authz] user_id={user_id}, claims={jwt_claims}")
-
             body = request.get_json(silent=True) or {}
             org_id = (
                 kwargs.get("org_id")

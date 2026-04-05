@@ -49,20 +49,12 @@ def _parse_cors_origins() -> list[str]:
 
 
 def create_app():
-    # SERVER_NAME must match request Host or Flask returns 404.
+    _logger = logging.getLogger("app.startup")
+
     server_name = os.getenv("SERVER_NAME")
-    # If helpinghands.local, use 127.0.0.1:PORT so requests to localhost work without -H Host
     if server_name and "helpinghands.local" in server_name:
         port = os.getenv("PORT", "5050")
         server_name = f"127.0.0.1:{port}"
-    # if "." in server_name:
-    #     app = Flask(
-    #         __name__,
-    #         host_matching=True,
-    #         static_host=server_name
-    #     )
-    # else:
-    #     app = Flask(__name__)
 
     app = Flask(__name__, subdomain_matching=True)
     logger = logging.getLogger("app.request")
@@ -83,7 +75,10 @@ def create_app():
     if server_name:
         app.config["SERVER_NAME"] = server_name
         if not is_production:
-            print(f"*** SERVER_NAME is {app.config['SERVER_NAME']!r}")
+            _logger.info("SERVER_NAME is %r", app.config["SERVER_NAME"])
+
+    # Request body size limit (50 MB — matches largest allowed media upload)
+    app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 
     # JWT
     jwt_secret = os.getenv("JWT_SECRET", "dev-secret")
@@ -92,9 +87,12 @@ def create_app():
             "JWT_SECRET must be set to a strong value (>= 32 chars) in production."
         )
     app.config["JWT_SECRET_KEY"] = jwt_secret
-    app.config["JWT_TOKEN_LOCATION"] = ["headers"]
+    app.config["JWT_TOKEN_LOCATION"] = ["cookies", "headers"]
     app.config["JWT_HEADER_NAME"] = "Authorization"
     app.config["JWT_HEADER_TYPE"] = "Bearer"
+    app.config["JWT_COOKIE_SECURE"] = is_production
+    app.config["JWT_COOKIE_SAMESITE"] = "Lax"
+    app.config["JWT_COOKIE_CSRF_PROTECT"] = False
     app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(minutes=15)
     app.config["JWT_REFRESH_TOKEN_EXPIRES"] = timedelta(days=30)
     JWTManager(app)
@@ -137,6 +135,18 @@ def create_app():
         ).inc()
         response.headers["X-Request-ID"] = getattr(g, "request_id", "")
 
+        # Security headers
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault(
+            "Referrer-Policy", "strict-origin-when-cross-origin"
+        )
+        if is_production:
+            response.headers.setdefault(
+                "Strict-Transport-Security",
+                "max-age=31536000; includeSubDomains",
+            )
+
         if os.getenv("STRUCTURED_LOGGING", "1") == "1":
             logger.info(
                 json.dumps(
@@ -161,11 +171,44 @@ def create_app():
 
         @app.before_request
         def _dbg_host():
-            print(f"DBG host={request.host!r} path={request.path!r}")
+            _logger.debug("DBG host=%r path=%r", request.host, request.path)
 
     @app.get("/__ping")
     def __ping():
-        return {"ok": True, "server_name": app.config.get("SERVER_NAME")}, 200
+        checks: dict = {"app": True}
+        status_code = 200
+
+        # Database check
+        try:
+            from app.utils.db import get_db_connection
+
+            conn = get_db_connection()
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+            conn.close()
+            checks["db"] = True
+        except Exception:
+            checks["db"] = False
+            status_code = 503
+
+        # Redis check
+        try:
+            from app.utils.cache import r
+
+            r().ping()
+            checks["redis"] = True
+        except Exception:
+            checks["redis"] = False
+            status_code = 503
+
+        return (
+            {
+                "ok": status_code == 200,
+                "checks": checks,
+                "server_name": app.config.get("SERVER_NAME"),
+            },
+            status_code,
+        )
 
     app.register_blueprint(core)
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
@@ -180,12 +223,15 @@ def create_app():
     app.register_blueprint(platform_bp)
 
     if os.getenv("PRINT_URL_MAP", "0") == "1":
-        print("\n=== URL MAP ===")
+        _logger.info("=== URL MAP ===")
         for rule in app.url_map.iter_rules():
-            print(
-                f"{rule!s:40} | endpoint={rule.endpoint:30} | subdomain={getattr(rule, 'subdomain', None)}"
+            _logger.info(
+                "%s | endpoint=%s | subdomain=%s",
+                str(rule).ljust(40),
+                rule.endpoint.ljust(30),
+                getattr(rule, "subdomain", None),
             )
-        print("================\n")
+        _logger.info("================")
 
     init_socketio(app)
     return app
