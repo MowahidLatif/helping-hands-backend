@@ -19,12 +19,13 @@ init_socketio(app)
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5050))
+    is_dev = os.getenv("FLASK_ENV") == "development"
     socketio.run(
         app,
         host="127.0.0.1",
         port=port,
-        debug=False,
-        use_reloader=False,
+        debug=is_dev,
+        use_reloader=is_dev,
         log_output=True,
     )
 
