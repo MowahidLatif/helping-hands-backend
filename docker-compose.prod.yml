@@ -1,0 +1,37 @@
+version: "3.9"
+
+# Production compose for EC2.
+# Uses RDS (external) for Postgres and real AWS S3 for media.
+# Run with: docker compose -f docker-compose.prod.yml --env-file .env up -d
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: donations-redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - redisdata:/data
+    networks: [backend]
+
+  backend:
+    build: .
+    container_name: donations-backend
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "5050:5050"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [backend]
+
+networks:
+  backend: {}
+
+volumes:
+  redisdata: {}
