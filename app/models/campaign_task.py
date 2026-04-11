@@ -70,7 +70,9 @@ def _serialize_task_row(row: tuple[Any, ...], campaign_title: Optional[str] = No
     return payload
 
 
-def list_campaign_tasks(campaign_id: str) -> List[dict[str, Any]]:
+def list_campaign_tasks(
+    campaign_id: str, viewer_user_id: Optional[str] = None, viewer_role: Optional[str] = None
+) -> List[dict[str, Any]]:
     sql = """
     SELECT
       t.id,
@@ -99,13 +101,23 @@ def list_campaign_tasks(campaign_id: str) -> List[dict[str, Any]]:
     GROUP BY t.id, s.name
     ORDER BY t.created_at
     """
+    params: list[Any] = [campaign_id]
+    if viewer_role not in ("owner", "admin") and viewer_user_id:
+        sql = sql.replace(
+            "WHERE t.campaign_id = %s",
+            "WHERE t.campaign_id = %s AND EXISTS (SELECT 1 FROM campaign_task_assignees va WHERE va.task_id = t.id AND va.user_id = %s)",
+        )
+        params.append(viewer_user_id)
     with get_db_connection() as conn, conn.cursor() as cur:
-        cur.execute(sql, (campaign_id,))
+        cur.execute(sql, params)
         return [_serialize_task_row(r) for r in cur.fetchall()]
 
 
 def list_org_campaign_tasks(
-    org_id: str, campaign_id: Optional[str] = None
+    org_id: str,
+    campaign_id: Optional[str] = None,
+    viewer_user_id: Optional[str] = None,
+    viewer_role: Optional[str] = None,
 ) -> List[dict[str, Any]]:
     sql = """
     SELECT
@@ -136,6 +148,14 @@ def list_org_campaign_tasks(
     WHERE c.org_id = %s
     """
     params: list[Any] = [org_id]
+    if viewer_role not in ("owner", "admin") and viewer_user_id:
+        sql += """
+        AND EXISTS (
+          SELECT 1 FROM campaign_task_assignees va
+          WHERE va.task_id = t.id AND va.user_id = %s
+        )
+        """
+        params.append(viewer_user_id)
     if campaign_id:
         sql += " AND t.campaign_id = %s"
         params.append(campaign_id)

@@ -286,7 +286,19 @@ def remove_member(org_id, user_id):
 @require_org_role()
 def list_org_tasks(org_id):
     campaign_id = (request.args.get("campaign_id") or "").strip() or None
-    return jsonify(list_org_campaign_tasks(org_id, campaign_id=campaign_id)), 200
+    user_id = get_jwt_identity()
+    role = get_user_role_in_org(user_id, org_id)
+    return (
+        jsonify(
+            list_org_campaign_tasks(
+                org_id,
+                campaign_id=campaign_id,
+                viewer_user_id=user_id,
+                viewer_role=role,
+            )
+        ),
+        200,
+    )
 
 
 @orgs.get("/api/orgs/<org_id>/task-statuses")

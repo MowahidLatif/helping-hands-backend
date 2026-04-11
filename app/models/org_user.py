@@ -54,6 +54,23 @@ def list_org_members(org_id: str) -> List[Dict[str, Any]]:
         ]
 
 
+def list_org_user_ids_by_roles(org_id: str, roles: List[str]) -> List[str]:
+    roles = [str(r or "").strip().lower() for r in roles if str(r or "").strip()]
+    if not roles:
+        return []
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT user_id
+            FROM org_users
+            WHERE org_id = %s
+              AND role = ANY(%s)
+            """,
+            (org_id, roles),
+        )
+        return [str(r[0]) for r in cur.fetchall()]
+
+
 def set_user_role(org_id: str, user_id: str, role: str) -> bool:
     sql = "UPDATE org_users SET role = %s WHERE org_id = %s AND user_id = %s"
     with get_db_connection() as conn, conn.cursor() as cur:

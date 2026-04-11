@@ -34,7 +34,7 @@ from app.models.donation import (
 from app.models.media import list_media_for_campaign
 from app.services.giveaway_service import draw_winner_for_campaign
 from uuid import UUID
-from app.models.org_user import get_user_role_in_org
+from app.models.org_user import get_user_role_in_org, list_org_user_ids_by_roles
 from flask_jwt_extended import get_jwt_identity
 from app.models.email_receipt import (
     list_receipts_for_campaign,
@@ -62,6 +62,16 @@ from app.models.campaign_task import (
     create_campaign_task,
     update_campaign_task,
     delete_campaign_task,
+)
+from app.models.campaign_task_activity import (
+    list_task_comments,
+    create_task_comment,
+    add_comment_reaction,
+    list_checklist_items,
+    create_checklist_item,
+    update_checklist_item,
+    create_time_entry,
+    create_notification_intents,
 )
 from app.models.task_status import get_task_status
 from app.models.org_permissions import user_has_permission
@@ -803,6 +813,76 @@ def _extract_assignee_user_ids(data: dict) -> list[str] | None:
     return None
 
 
+def _task_assignee_ids(task: dict) -> set[str]:
+    return {
+        str(a.get("user_id"))
+        for a in (task.get("assignees") or [])
+        if a and a.get("user_id")
+    }
+
+
+def _can_view_task(user_id: str, role: str, task: dict) -> bool:
+    if role in ("owner", "admin"):
+        return True
+    return str(user_id) in _task_assignee_ids(task)
+
+
+def _status_name_for(org_id: str, status_id: str | None) -> str:
+    if not status_id:
+        return "No status"
+    status = get_task_status(status_id, org_id)
+    if not status:
+        return status_id
+    return status.get("name") or status_id
+
+
+def _create_status_change_system_comment(
+    task: dict,
+    campaign_id: str,
+    org_id: str,
+    actor_user_id: str,
+    old_status_id: str | None,
+    new_status_id: str | None,
+):
+    if old_status_id == new_status_id:
+        return
+    from_label = _status_name_for(org_id, old_status_id)
+    to_label = _status_name_for(org_id, new_status_id)
+    create_task_comment(
+        task_id=str(task["id"]),
+        campaign_id=campaign_id,
+        org_id=org_id,
+        author_user_id=actor_user_id,
+        comment_type="status_change",
+        body=f"Status changed from {from_label} to {to_label}.",
+        metadata={"from_status_id": old_status_id, "to_status_id": new_status_id},
+    )
+
+
+def _create_reassignment_system_comment(
+    task: dict,
+    campaign_id: str,
+    org_id: str,
+    actor_user_id: str,
+    old_ids: list[str],
+    new_ids: list[str],
+    note: str | None = None,
+):
+    old_set = sorted(set(old_ids))
+    new_set = sorted(set(new_ids))
+    if old_set == new_set:
+        return
+    create_task_comment(
+        task_id=str(task["id"]),
+        campaign_id=campaign_id,
+        org_id=org_id,
+        author_user_id=actor_user_id,
+        comment_type="reassignment",
+        body=(note or "").strip() or "Task assignees were updated.",
+        metadata={"from_assignee_user_ids": old_set, "to_assignee_user_ids": new_set},
+    )
+
+
 @campaigns.get("/<campaign_id>/tasks")
 @jwt_required()
 def list_campaign_tasks_route(campaign_id):
@@ -814,7 +894,9 @@ def list_campaign_tasks_route(campaign_id):
     role = get_user_role_in_org(get_jwt_identity(), camp["org_id"])
     if not role:
         return jsonify({"error": "not a member"}), 403
-    tasks = list_campaign_tasks(campaign_id)
+    tasks = list_campaign_tasks(
+        campaign_id, viewer_user_id=get_jwt_identity(), viewer_role=role
+    )
     return jsonify(tasks), 200
 
 
@@ -873,17 +955,27 @@ def patch_campaign_task_route(campaign_id, task_id):
     role = get_user_role_in_org(user_id, org_id)
     if not role:
         return jsonify({"error": "not a member"}), 403
+    if not _can_view_task(str(user_id), role, task):
+        return jsonify({"error": "forbidden"}), 403
     data = request.get_json(silent=True) or {}
     only_status = set(data.keys()) <= {"status_id"} and "status_id" in data
-    task_assignee_ids = {
-        str(a.get("user_id")) for a in (task.get("assignees") or []) if a.get("user_id")
-    }
+    task_assignee_ids = _task_assignee_ids(task)
+    old_status_id = task.get("status_id")
     if only_status:
         if role in ("owner", "admin") or str(user_id) in task_assignee_ids:
             status_id = data.get("status_id")
             if status_id and not get_task_status(status_id, org_id):
                 return jsonify({"error": "invalid status_id"}), 400
             updated = update_campaign_task(task_id, campaign_id, status_id=status_id)
+            if updated:
+                _create_status_change_system_comment(
+                    task=updated,
+                    campaign_id=campaign_id,
+                    org_id=org_id,
+                    actor_user_id=str(user_id),
+                    old_status_id=old_status_id,
+                    new_status_id=updated.get("status_id"),
+                )
             return jsonify(updated), 200
         return (
             jsonify({"error": "forbidden: only assignee or admin can update status"}),
@@ -904,6 +996,16 @@ def patch_campaign_task_route(campaign_id, task_id):
             if task_assignee_ids:
                 return jsonify({"error": "task already assigned"}), 409
             updated = update_campaign_task(task_id, campaign_id, assignee_user_ids=[user_id])
+            if updated:
+                _create_reassignment_system_comment(
+                    task=updated,
+                    campaign_id=campaign_id,
+                    org_id=org_id,
+                    actor_user_id=str(user_id),
+                    old_ids=list(task_assignee_ids),
+                    new_ids=[str(user_id)],
+                    note="Self-assigned task.",
+                )
             return jsonify(updated), 200
     if not user_has_permission(user_id, org_id, "tasks:edit_any", role):
         return jsonify({"error": "forbidden: tasks:edit_any required"}), 403
@@ -935,6 +1037,24 @@ def patch_campaign_task_route(campaign_id, task_id):
     )
     if not updated:
         return jsonify({"error": "not found"}), 404
+    _create_status_change_system_comment(
+        task=updated,
+        campaign_id=campaign_id,
+        org_id=org_id,
+        actor_user_id=str(user_id),
+        old_status_id=old_status_id,
+        new_status_id=updated.get("status_id"),
+    )
+    if assignee_user_ids is not None:
+        _create_reassignment_system_comment(
+            task=updated,
+            campaign_id=campaign_id,
+            org_id=org_id,
+            actor_user_id=str(user_id),
+            old_ids=list(task_assignee_ids),
+            new_ids=assignee_user_ids,
+            note=(data.get("reassignment_note") or "").strip() or None,
+        )
     return jsonify(updated), 200
 
 
@@ -958,6 +1078,217 @@ def delete_campaign_task_route(campaign_id, task_id):
     if not delete_campaign_task(task_id, campaign_id):
         return jsonify({"error": "not found"}), 404
     return "", 204
+
+
+def _load_task_with_access(campaign_id: str, task_id: str):
+    camp = get_campaign(campaign_id)
+    if not camp:
+        return None, None, None, (jsonify({"error": "not found"}), 404)
+    task = get_campaign_task(task_id, campaign_id)
+    if not task:
+        return None, None, None, (jsonify({"error": "not found"}), 404)
+    user_id = get_jwt_identity()
+    role = get_user_role_in_org(user_id, camp["org_id"])
+    if not role:
+        return None, None, None, (jsonify({"error": "not a member"}), 403)
+    if not _can_view_task(str(user_id), role, task):
+        return None, None, None, (jsonify({"error": "forbidden"}), 403)
+    return camp, task, {"user_id": str(user_id), "role": role}, None
+
+
+@campaigns.get("/<campaign_id>/tasks/<task_id>/comments")
+@jwt_required()
+def list_task_comments_route(campaign_id, task_id):
+    _, task, _, error = _load_task_with_access(campaign_id, task_id)
+    if error:
+        return error
+    return jsonify(list_task_comments(str(task["id"]))), 200
+
+
+@campaigns.post("/<campaign_id>/tasks/<task_id>/comments")
+@jwt_required()
+def create_task_comment_route(campaign_id, task_id):
+    camp, task, actor, error = _load_task_with_access(campaign_id, task_id)
+    if error:
+        return error
+    data = request.get_json(silent=True) or {}
+    comment_type = (data.get("comment_type") or "text").strip()
+    body = (data.get("body") or "").strip() or None
+    metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+    mention_user_ids = data.get("mention_user_ids") or []
+    if not isinstance(mention_user_ids, list):
+        return jsonify({"error": "mention_user_ids must be an array"}), 400
+    clean_mentions = []
+    for uid in mention_user_ids:
+        s_uid = str(uid or "").strip()
+        if not s_uid:
+            continue
+        if not get_user_role_in_org(s_uid, camp["org_id"]):
+            return jsonify({"error": "mentioned user must be org member"}), 400
+        if s_uid not in clean_mentions:
+            clean_mentions.append(s_uid)
+
+    if comment_type == "time_log":
+        hours = metadata.get("hours")
+        try:
+            hours = float(hours)
+        except Exception:
+            return jsonify({"error": "time_log requires metadata.hours"}), 400
+        if hours <= 0:
+            return jsonify({"error": "hours must be > 0"}), 400
+        create_time_entry(
+            task_id=str(task["id"]),
+            campaign_id=campaign_id,
+            org_id=camp["org_id"],
+            user_id=actor["user_id"],
+            hours=hours,
+            note=body,
+        )
+
+    if comment_type == "reassignment":
+        if actor["role"] not in ("owner", "admin"):
+            return jsonify({"error": "forbidden: owner/admin required"}), 403
+        new_ids = data.get("assignee_user_ids")
+        if not isinstance(new_ids, list):
+            return jsonify({"error": "assignee_user_ids required for reassignment"}), 400
+        normalized_new = []
+        for uid in new_ids:
+            s_uid = str(uid or "").strip()
+            if not s_uid:
+                continue
+            if not get_user_role_in_org(s_uid, camp["org_id"]):
+                return jsonify({"error": "assignee must be org member"}), 400
+            if s_uid not in normalized_new:
+                normalized_new.append(s_uid)
+        old_ids = list(_task_assignee_ids(task))
+        updated_task = update_campaign_task(
+            str(task["id"]), campaign_id, assignee_user_ids=normalized_new
+        )
+        if updated_task:
+            task = updated_task
+        _create_reassignment_system_comment(
+            task=task,
+            campaign_id=campaign_id,
+            org_id=camp["org_id"],
+            actor_user_id=actor["user_id"],
+            old_ids=old_ids,
+            new_ids=normalized_new,
+            note=body,
+        )
+
+    # Mentioning grants access by adding assignees.
+    if clean_mentions:
+        existing = list(_task_assignee_ids(task))
+        merged = sorted(set(existing + clean_mentions))
+        updated_task = update_campaign_task(
+            str(task["id"]), campaign_id, assignee_user_ids=merged
+        )
+        if updated_task:
+            task = updated_task
+
+    comment = create_task_comment(
+        task_id=str(task["id"]),
+        campaign_id=campaign_id,
+        org_id=camp["org_id"],
+        author_user_id=actor["user_id"],
+        comment_type=comment_type,
+        body=body,
+        metadata=metadata,
+        mention_user_ids=clean_mentions,
+    )
+
+    if comment_type in ("blocked", "decision_needed", "escalation"):
+        owners_and_admins = list_org_user_ids_by_roles(camp["org_id"], ["owner", "admin"])
+        recipients = [uid for uid in owners_and_admins if uid != actor["user_id"]]
+        create_notification_intents(
+            task_id=str(task["id"]),
+            org_id=camp["org_id"],
+            recipient_user_ids=recipients,
+            event_type=comment_type,
+            comment_id=comment.get("id"),
+        )
+    return jsonify(comment), 201
+
+
+@campaigns.post("/<campaign_id>/tasks/<task_id>/comments/<comment_id>/reactions")
+@jwt_required()
+def add_task_comment_reaction_route(campaign_id, task_id, comment_id):
+    _, _, actor, error = _load_task_with_access(campaign_id, task_id)
+    if error:
+        return error
+    reaction = (request.get_json(silent=True) or {}).get("reaction")
+    reaction = (reaction or "").strip()
+    if not reaction:
+        return jsonify({"error": "reaction required"}), 400
+    add_comment_reaction(comment_id, actor["user_id"], reaction)
+    return jsonify({"ok": True}), 200
+
+
+@campaigns.get("/<campaign_id>/tasks/<task_id>/checklist")
+@jwt_required()
+def list_task_checklist_route(campaign_id, task_id):
+    _, task, _, error = _load_task_with_access(campaign_id, task_id)
+    if error:
+        return error
+    return jsonify(list_checklist_items(str(task["id"]))), 200
+
+
+@campaigns.post("/<campaign_id>/tasks/<task_id>/checklist")
+@jwt_required()
+def create_task_checklist_route(campaign_id, task_id):
+    camp, task, actor, error = _load_task_with_access(campaign_id, task_id)
+    if error:
+        return error
+    title = ((request.get_json(silent=True) or {}).get("title") or "").strip()
+    if not title:
+        return jsonify({"error": "title required"}), 400
+    item = create_checklist_item(
+        task_id=str(task["id"]),
+        campaign_id=campaign_id,
+        org_id=camp["org_id"],
+        title=title,
+        created_by_user_id=actor["user_id"],
+    )
+    create_task_comment(
+        task_id=str(task["id"]),
+        campaign_id=campaign_id,
+        org_id=camp["org_id"],
+        author_user_id=actor["user_id"],
+        comment_type="checklist",
+        body=f"Added checklist item: {title}",
+        metadata={"checklist_item_id": item["id"]},
+    )
+    return jsonify(item), 201
+
+
+@campaigns.patch("/<campaign_id>/tasks/<task_id>/checklist/<checklist_id>")
+@jwt_required()
+def patch_task_checklist_route(campaign_id, task_id, checklist_id):
+    camp, task, actor, error = _load_task_with_access(campaign_id, task_id)
+    if error:
+        return error
+    data = request.get_json(silent=True) or {}
+    if "is_checked" not in data:
+        return jsonify({"error": "is_checked required"}), 400
+    is_checked = bool(data.get("is_checked"))
+    item = update_checklist_item(
+        checklist_id=checklist_id,
+        task_id=str(task["id"]),
+        is_checked=is_checked,
+        checked_by_user_id=actor["user_id"] if is_checked else None,
+    )
+    if not item:
+        return jsonify({"error": "not found"}), 404
+    create_task_comment(
+        task_id=str(task["id"]),
+        campaign_id=campaign_id,
+        org_id=camp["org_id"],
+        author_user_id=actor["user_id"],
+        comment_type="checklist",
+        body=f"{'Checked' if is_checked else 'Unchecked'} checklist item: {item['title']}",
+        metadata={"checklist_item_id": item["id"], "is_checked": is_checked},
+    )
+    return jsonify(item), 200
 
 
 def _serialize_job(row: dict) -> dict:
