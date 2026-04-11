@@ -36,6 +36,48 @@ def list_campaign_tasks(campaign_id: str) -> List[dict[str, Any]]:
         ]
 
 
+def list_org_campaign_tasks(
+    org_id: str, campaign_id: Optional[str] = None
+) -> List[dict[str, Any]]:
+    sql = """
+    SELECT t.id, t.campaign_id, t.title, t.description, t.assignee_user_id, t.status_id,
+           t.created_at, t.updated_at,
+           u.name AS assignee_name, u.email AS assignee_email,
+           s.name AS status_name,
+           c.title AS campaign_title
+    FROM campaign_tasks t
+    JOIN campaigns c ON c.id = t.campaign_id
+    LEFT JOIN users u ON u.id = t.assignee_user_id
+    LEFT JOIN task_statuses s ON s.id = t.status_id
+    WHERE c.org_id = %s
+    """
+    params: list[Any] = [org_id]
+    if campaign_id:
+        sql += " AND t.campaign_id = %s"
+        params.append(campaign_id)
+    sql += " ORDER BY t.created_at DESC"
+
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, params)
+        return [
+            {
+                "id": str(r[0]),
+                "campaign_id": str(r[1]),
+                "title": r[2],
+                "description": r[3],
+                "assignee_user_id": str(r[4]) if r[4] else None,
+                "status_id": str(r[5]) if r[5] else None,
+                "created_at": r[6].isoformat() if r[6] else None,
+                "updated_at": r[7].isoformat() if r[7] else None,
+                "assignee_name": r[8],
+                "assignee_email": r[9],
+                "status_name": r[10],
+                "campaign_title": r[11],
+            }
+            for r in cur.fetchall()
+        ]
+
+
 def get_campaign_task(task_id: str, campaign_id: str) -> Optional[dict[str, Any]]:
     sql = """
     SELECT t.id, t.campaign_id, t.title, t.description, t.assignee_user_id, t.status_id,

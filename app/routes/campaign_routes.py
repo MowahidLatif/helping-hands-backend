@@ -809,8 +809,8 @@ def create_campaign_task_route(campaign_id):
     role = get_user_role_in_org(user_id, org_id)
     if not role:
         return jsonify({"error": "not a member"}), 403
-    if not user_has_permission(user_id, org_id, "tasks:create", role):
-        return jsonify({"error": "forbidden: tasks:create required"}), 403
+    if role not in ("owner", "admin"):
+        return jsonify({"error": "forbidden: owner/admin required"}), 403
     data = request.get_json(silent=True) or {}
     title = (data.get("title") or "").strip()
     if not title:
@@ -863,6 +863,18 @@ def patch_campaign_task_route(campaign_id, task_id):
             jsonify({"error": "forbidden: only assignee or admin can update status"}),
             403,
         )
+    only_assignee = set(data.keys()) == {"assignee_user_id"}
+    if only_assignee:
+        assignee_user_id = data.get("assignee_user_id")
+        if assignee_user_id and not get_user_role_in_org(assignee_user_id, org_id):
+            return jsonify({"error": "assignee must be org member"}), 400
+        if assignee_user_id and str(assignee_user_id) == str(user_id):
+            if task.get("assignee_user_id"):
+                return jsonify({"error": "task already assigned"}), 409
+            updated = update_campaign_task(
+                task_id, campaign_id, assignee_user_id=assignee_user_id
+            )
+            return jsonify(updated), 200
     if not user_has_permission(user_id, org_id, "tasks:edit_any", role):
         return jsonify({"error": "forbidden: tasks:edit_any required"}), 403
     title = data.get("title")

@@ -22,6 +22,7 @@ from app.models.org_permissions import (
     set_member_permissions,
     ALL_PERMISSIONS,
 )
+from app.models.campaign_task import list_org_campaign_tasks
 from app.models.task_status import (
     list_task_statuses,
     create_task_status,
@@ -279,6 +280,13 @@ def change_role(org_id, user_id):
 def remove_member(org_id, user_id):
     ok = remove_user_from_org(org_id, user_id)
     return ("", 204) if ok else (jsonify({"error": "not found"}), 404)
+
+
+@orgs.get("/api/orgs/<org_id>/tasks")
+@require_org_role()
+def list_org_tasks(org_id):
+    campaign_id = (request.args.get("campaign_id") or "").strip() or None
+    return jsonify(list_org_campaign_tasks(org_id, campaign_id=campaign_id)), 200
 
 
 @orgs.get("/api/orgs/<org_id>/task-statuses")
