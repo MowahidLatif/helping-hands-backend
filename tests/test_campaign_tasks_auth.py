@@ -50,12 +50,15 @@ def test_create_task_owner_success(monkeypatch):
     )
     monkeypatch.setattr(
         "app.routes.campaign_routes.create_campaign_task",
-        lambda campaign_id, title, description=None, assignee_user_id=None, status_id=None: {
+        lambda campaign_id, title, description=None, assignee_user_ids=None, status_id=None: {
             "id": "task_1",
             "campaign_id": campaign_id,
             "title": title,
             "description": description,
-            "assignee_user_id": assignee_user_id,
+            "assignees": [
+                {"user_id": uid, "name": None, "email": f"{uid}@example.com"}
+                for uid in (assignee_user_ids or [])
+            ],
             "status_id": status_id,
         },
     )
@@ -64,7 +67,7 @@ def test_create_task_owner_success(monkeypatch):
         json={
             "title": "Task 1",
             "description": "Do something",
-            "assignee_user_id": "member_1",
+            "assignee_user_ids": ["member_1", "member_2"],
             "status_id": "status_1",
         }
     ):
@@ -73,7 +76,7 @@ def test_create_task_owner_success(monkeypatch):
     assert status == 201
     body = resp.get_json()
     assert body["title"] == "Task 1"
-    assert body["assignee_user_id"] == "member_1"
+    assert len(body["assignees"]) == 2
 
 
 def test_member_can_self_assign_unassigned_task(monkeypatch):
@@ -89,7 +92,7 @@ def test_member_can_self_assign_unassigned_task(monkeypatch):
         lambda _task_id, _campaign_id: {
             "id": "task_1",
             "campaign_id": "camp_1",
-            "assignee_user_id": None,
+            "assignees": [],
         },
     )
     monkeypatch.setattr("app.routes.campaign_routes.get_jwt_identity", lambda: "member_1")
@@ -102,15 +105,18 @@ def test_member_can_self_assign_unassigned_task(monkeypatch):
         lambda _task_id, _campaign_id, **updates: {
             "id": "task_1",
             "campaign_id": "camp_1",
-            "assignee_user_id": updates.get("assignee_user_id"),
+            "assignees": [
+                {"user_id": uid, "name": None, "email": None}
+                for uid in (updates.get("assignee_user_ids") or [])
+            ],
         },
     )
 
-    with app.test_request_context(json={"assignee_user_id": "member_1"}):
+    with app.test_request_context(json={"assignee_user_ids": ["member_1"]}):
         resp, status = route_fn("camp_1", "task_1")
 
     assert status == 200
-    assert resp.get_json()["assignee_user_id"] == "member_1"
+    assert resp.get_json()["assignees"][0]["user_id"] == "member_1"
 
 
 def test_member_cannot_self_assign_assigned_task(monkeypatch):
@@ -126,7 +132,7 @@ def test_member_cannot_self_assign_assigned_task(monkeypatch):
         lambda _task_id, _campaign_id: {
             "id": "task_1",
             "campaign_id": "camp_1",
-            "assignee_user_id": "owner_1",
+            "assignees": [{"user_id": "owner_1", "name": None, "email": None}],
         },
     )
     monkeypatch.setattr("app.routes.campaign_routes.get_jwt_identity", lambda: "member_1")
@@ -135,7 +141,7 @@ def test_member_cannot_self_assign_assigned_task(monkeypatch):
         lambda *_args, **_kwargs: "member",
     )
 
-    with app.test_request_context(json={"assignee_user_id": "member_1"}):
+    with app.test_request_context(json={"assignee_user_ids": ["member_1"]}):
         resp, status = route_fn("camp_1", "task_1")
 
     assert status == 409

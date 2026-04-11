@@ -66,11 +66,13 @@ def remove_user_from_org(org_id: str, user_id: str) -> bool:
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
             """
-            UPDATE campaign_tasks
-            SET assignee_user_id = NULL
-            WHERE assignee_user_id = %s
-              AND campaign_id IN (
-                  SELECT id FROM campaigns WHERE org_id = %s
+            DELETE FROM campaign_task_assignees
+            WHERE user_id = %s
+              AND task_id IN (
+                  SELECT ct.id
+                  FROM campaign_tasks ct
+                  JOIN campaigns c ON c.id = ct.campaign_id
+                  WHERE c.org_id = %s
               )
             """,
             (user_id, org_id),

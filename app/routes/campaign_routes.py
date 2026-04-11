@@ -781,6 +781,28 @@ def delete_update_route(campaign_id, update_id):
 # ----- Campaign tasks (campaign-specific tasks with assignee and status) -----
 
 
+def _extract_assignee_user_ids(data: dict) -> list[str] | None:
+    if "assignee_user_ids" in data:
+        raw = data.get("assignee_user_ids")
+        if raw is None:
+            return []
+        if not isinstance(raw, list):
+            return None
+        out = []
+        seen = set()
+        for item in raw:
+            uid = str(item or "").strip()
+            if not uid or uid in seen:
+                continue
+            seen.add(uid)
+            out.append(uid)
+        return out
+    if "assignee_user_id" in data:
+        uid = str(data.get("assignee_user_id") or "").strip()
+        return [uid] if uid else []
+    return None
+
+
 @campaigns.get("/<campaign_id>/tasks")
 @jwt_required()
 def list_campaign_tasks_route(campaign_id):
@@ -816,17 +838,20 @@ def create_campaign_task_route(campaign_id):
     if not title:
         return jsonify({"error": "title required"}), 400
     description = (data.get("description") or "").strip() or None
-    assignee_user_id = data.get("assignee_user_id") or None
+    assignee_user_ids = _extract_assignee_user_ids(data)
+    if assignee_user_ids is None:
+        return jsonify({"error": "assignee_user_ids must be an array"}), 400
     status_id = data.get("status_id") or None
-    if assignee_user_id and not get_user_role_in_org(assignee_user_id, org_id):
-        return jsonify({"error": "assignee must be org member"}), 400
+    for assignee_user_id in assignee_user_ids:
+        if not get_user_role_in_org(assignee_user_id, org_id):
+            return jsonify({"error": "assignee must be org member"}), 400
     if status_id and not get_task_status(status_id, org_id):
         return jsonify({"error": "invalid status_id"}), 400
     task = create_campaign_task(
         campaign_id,
         title,
         description=description,
-        assignee_user_id=assignee_user_id,
+        assignee_user_ids=assignee_user_ids,
         status_id=status_id,
     )
     return jsonify(task), 201
@@ -850,10 +875,11 @@ def patch_campaign_task_route(campaign_id, task_id):
         return jsonify({"error": "not a member"}), 403
     data = request.get_json(silent=True) or {}
     only_status = set(data.keys()) <= {"status_id"} and "status_id" in data
+    task_assignee_ids = {
+        str(a.get("user_id")) for a in (task.get("assignees") or []) if a.get("user_id")
+    }
     if only_status:
-        if role in ("owner", "admin") or (
-            task.get("assignee_user_id") and str(task["assignee_user_id"]) == user_id
-        ):
+        if role in ("owner", "admin") or str(user_id) in task_assignee_ids:
             status_id = data.get("status_id")
             if status_id and not get_task_status(status_id, org_id):
                 return jsonify({"error": "invalid status_id"}), 400
@@ -863,17 +889,21 @@ def patch_campaign_task_route(campaign_id, task_id):
             jsonify({"error": "forbidden: only assignee or admin can update status"}),
             403,
         )
-    only_assignee = set(data.keys()) == {"assignee_user_id"}
+    only_assignee = set(data.keys()) <= {"assignee_user_id", "assignee_user_ids"} and (
+        "assignee_user_id" in data or "assignee_user_ids" in data
+    )
     if only_assignee:
-        assignee_user_id = data.get("assignee_user_id")
-        if assignee_user_id and not get_user_role_in_org(assignee_user_id, org_id):
-            return jsonify({"error": "assignee must be org member"}), 400
-        if assignee_user_id and str(assignee_user_id) == str(user_id):
-            if task.get("assignee_user_id"):
+        assignee_user_ids = _extract_assignee_user_ids(data)
+        if assignee_user_ids is None:
+            return jsonify({"error": "assignee_user_ids must be an array"}), 400
+        for assignee_user_id in assignee_user_ids:
+            if not get_user_role_in_org(assignee_user_id, org_id):
+                return jsonify({"error": "assignee must be org member"}), 400
+        is_self_assign = assignee_user_ids == [str(user_id)]
+        if is_self_assign:
+            if task_assignee_ids:
                 return jsonify({"error": "task already assigned"}), 409
-            updated = update_campaign_task(
-                task_id, campaign_id, assignee_user_id=assignee_user_id
-            )
+            updated = update_campaign_task(task_id, campaign_id, assignee_user_ids=[user_id])
             return jsonify(updated), 200
     if not user_has_permission(user_id, org_id, "tasks:edit_any", role):
         return jsonify({"error": "forbidden: tasks:edit_any required"}), 403
@@ -883,13 +913,15 @@ def patch_campaign_task_route(campaign_id, task_id):
     description = data.get("description")
     if description is not None:
         description = (description or "").strip() or None
-    assignee_user_id = data.get("assignee_user_id")
-    if (
-        assignee_user_id is not None
-        and assignee_user_id
-        and not get_user_role_in_org(assignee_user_id, org_id)
+    assignee_user_ids = _extract_assignee_user_ids(data)
+    if assignee_user_ids is None and (
+        "assignee_user_id" in data or "assignee_user_ids" in data
     ):
-        return jsonify({"error": "assignee must be org member"}), 400
+        return jsonify({"error": "assignee_user_ids must be an array"}), 400
+    if assignee_user_ids is not None:
+        for assignee_user_id in assignee_user_ids:
+            if not get_user_role_in_org(assignee_user_id, org_id):
+                return jsonify({"error": "assignee must be org member"}), 400
     status_id = data.get("status_id")
     if status_id is not None and status_id and not get_task_status(status_id, org_id):
         return jsonify({"error": "invalid status_id"}), 400
@@ -898,7 +930,7 @@ def patch_campaign_task_route(campaign_id, task_id):
         campaign_id,
         title=title,
         description=description,
-        assignee_user_id=assignee_user_id,
+        assignee_user_ids=assignee_user_ids,
         status_id=status_id,
     )
     if not updated:
