@@ -5,6 +5,7 @@ Validate AI-generated site recipe JSON (DSL v1). No executable code — declarat
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from app.utils.recipe_url_allowlist import assert_allowed_media_url
@@ -19,6 +20,9 @@ MAX_DONATE_LABEL_LEN = 120
 MAX_ALT_LEN = 500
 MAX_PROP_URL_LEN = 2048
 MAX_RECIPE_JSON_BYTES = 131_072  # 128 KiB
+MAX_THEME_FONT_LEN = 80
+MAX_THEME_RADIUS_LEN = 20
+_HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{3,8}$")
 
 ALLOWED_TYPES = frozenset(
     {
@@ -250,6 +254,26 @@ def _validate_props(node_type: str, props: dict[str, Any]) -> str | None:
     return None
 
 
+def _validate_theme(theme: Any) -> dict[str, Any] | None:
+    """Return a clean theme dict if valid, else None (theme is optional — invalid = ignored)."""
+    if not isinstance(theme, dict):
+        return None
+    out: dict[str, Any] = {}
+    for field in ("primary_color", "secondary_color"):
+        val = theme.get(field)
+        if val is None:
+            continue
+        if isinstance(val, str) and _HEX_COLOR_RE.match(val.strip()):
+            out[field] = val.strip().upper() if val.strip().startswith("#") else "#" + val.strip().upper()
+    for field, max_len in (("font_family", MAX_THEME_FONT_LEN), ("border_radius", MAX_THEME_RADIUS_LEN)):
+        val = theme.get(field)
+        if val is None:
+            continue
+        if isinstance(val, str) and val.strip():
+            out[field] = val.strip()[:max_len]
+    return out if out else None
+
+
 def validate_ai_site_recipe(raw: Any) -> tuple[dict[str, Any] | None, str | None]:
     """
     Returns (normalized_recipe, None) on success, or (None, error_message).
@@ -298,7 +322,10 @@ def validate_ai_site_recipe(raw: Any) -> tuple[dict[str, Any] | None, str | None
         return None, "recipe must include at least one donate_section node"
     if not has_progress:
         return None, "recipe must include at least one progress_section node"
-    out = {"version": "1", "nodes": out_nodes}
+    out: dict[str, Any] = {"version": "1", "nodes": out_nodes}
+    theme = _validate_theme(raw.get("theme"))
+    if theme:
+        out["theme"] = theme
     try:
         encoded = json.dumps(out, ensure_ascii=False)
     except (TypeError, ValueError):

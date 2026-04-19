@@ -67,6 +67,7 @@ def build_master_prompt(
     campaign_title: str,
     assets: list[dict[str, Any]],
     total_campaign_assets: int,
+    theme: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
     """
     Returns (system_message, user_message).
@@ -78,6 +79,22 @@ def build_master_prompt(
         + "\nCampaign title (context): "
         + _strip_control(campaign_title or "Fundraiser")[:200]
     )
+    if theme:
+        parts = []
+        if theme.get("primary_color"):
+            parts.append(f"primary color {theme['primary_color']}")
+        if theme.get("secondary_color"):
+            parts.append(f"secondary color {theme['secondary_color']}")
+        if theme.get("font_family"):
+            parts.append(f"font {theme['font_family']}")
+        if theme.get("border_radius"):
+            parts.append(f"border radius {theme['border_radius']}")
+        if parts:
+            system += (
+                "\n\nBrand style for this campaign: "
+                + ", ".join(parts)
+                + ". Use these brand details to inform the tone and copy of headings, CTAs, and descriptions."
+            )
     n = len(assets)
     total = total_campaign_assets
     assets_json = json.dumps(assets, indent=2)
@@ -141,6 +158,7 @@ def generate_and_validate_recipe(
     *,
     user_prompt: str,
     campaign_id: str,
+    theme: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     camp = get_campaign(campaign_id)
     if not camp:
@@ -151,6 +169,7 @@ def generate_and_validate_recipe(
         campaign_title=str(camp.get("title") or ""),
         assets=assets,
         total_campaign_assets=total_assets,
+        theme=theme,
     )
     parsed = _openai_chat_json(system, user_msg)
     recipe, err = validate_ai_site_recipe(parsed)
@@ -189,6 +208,7 @@ def run_generation_job(
     job_id: str,
     campaign_id: str,
     user_prompt: str,
+    theme: dict[str, Any] | None = None,
 ) -> None:
     try:
         update_job(
@@ -205,7 +225,13 @@ def run_generation_job(
         recipe = generate_and_validate_recipe(
             user_prompt=user_prompt,
             campaign_id=campaign_id,
+            theme=theme,
         )
+        if theme:
+            from app.utils.ai_site_recipe import _validate_theme
+            validated_theme = _validate_theme(theme)
+            if validated_theme:
+                recipe["theme"] = validated_theme
         update_job(
             job_id,
             step="Saving site recipe",

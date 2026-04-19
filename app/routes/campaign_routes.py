@@ -8,6 +8,7 @@ from app.models.campaign import (
     get_campaign,
     get_page_layout,
     set_page_layout,
+    set_ai_site_recipe,
     update_campaign,
     delete_campaign,
     list_giveaway_logs,
@@ -1331,8 +1332,10 @@ def ai_site_generate(campaign_id):
         if pay_err:
             return jsonify({"error": pay_err}), 402
 
+    theme = body.get("theme") if isinstance(body.get("theme"), dict) else None
+
     job = create_job(campaign_id=campaign_id, created_by_user_id=str(user_id))
-    enqueue_ai_site_generation(str(job["id"]), campaign_id, prompt)
+    enqueue_ai_site_generation(str(job["id"]), campaign_id, prompt, theme=theme)
     return jsonify({"job": _serialize_job(job)}), 202
 
 
@@ -1354,3 +1357,77 @@ def ai_site_job_status(campaign_id, job_id):
     if not job:
         return jsonify({"error": "not found"}), 404
     return jsonify({"job": _serialize_job(job)}), 200
+
+
+@campaigns.post("/<campaign_id>/design/extract-tokens")
+@jwt_required()
+def design_extract_tokens(campaign_id):
+    if not _is_uuid(campaign_id):
+        return jsonify({"error": "invalid campaign_id"}), 400
+    camp = get_campaign(campaign_id)
+    if not camp:
+        return jsonify({"error": "not found"}), 404
+    user_id = get_jwt_identity()
+    role = get_user_role_in_org(user_id, camp["org_id"])
+    if not role:
+        return jsonify({"error": "not a member"}), 403
+    if not user_has_permission(user_id, camp["org_id"], "campaign:edit", role):
+        return jsonify({"error": "forbidden: campaign:edit required"}), 403
+
+    body = request.get_json(silent=True) or {}
+    url = (body.get("url") or "").strip()
+    description = (body.get("description") or "").strip()
+
+    if not url and not description:
+        return jsonify({"error": "url or description required"}), 400
+
+    from app.services.design_token_service import (
+        extract_tokens_from_url,
+        extract_tokens_from_description,
+    )
+    try:
+        if url:
+            tokens = extract_tokens_from_url(url)
+        else:
+            tokens = extract_tokens_from_description(description)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 422
+    except Exception as e:
+        return jsonify({"error": f"Token extraction failed: {e}"}), 500
+
+    return jsonify({"tokens": tokens}), 200
+
+
+@campaigns.put("/<campaign_id>/ai-site/recipe")
+@jwt_required()
+def ai_site_recipe_update(campaign_id):
+    if not _is_uuid(campaign_id):
+        return jsonify({"error": "invalid campaign_id"}), 400
+    camp = get_campaign(campaign_id)
+    if not camp:
+        return jsonify({"error": "not found"}), 404
+    user_id = get_jwt_identity()
+    role = get_user_role_in_org(user_id, camp["org_id"])
+    if not role:
+        return jsonify({"error": "not a member"}), 403
+    if not user_has_permission(user_id, camp["org_id"], "campaign:edit", role):
+        return jsonify({"error": "forbidden: campaign:edit required"}), 403
+
+    body = request.get_json(silent=True) or {}
+    raw_recipe = body.get("recipe")
+    if not isinstance(raw_recipe, dict):
+        return jsonify({"error": "recipe must be a JSON object"}), 400
+
+    from app.utils.ai_site_recipe import validate_ai_site_recipe
+    recipe, err = validate_ai_site_recipe(raw_recipe)
+    if err or not recipe:
+        return jsonify({"error": err or "invalid recipe"}), 400
+
+    set_ai_site_recipe(campaign_id, recipe)
+    try:
+        from app.utils.public_campaign_cache import invalidate_public_campaign_cache
+        invalidate_public_campaign_cache(campaign_id)
+    except Exception:
+        pass
+
+    return jsonify({"ok": True}), 200
