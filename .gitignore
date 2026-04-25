@@ -12,3 +12,5 @@ __pycache__/
 # Logs & temporary
 *.log
 .env
+.env.aws
+.env.local
