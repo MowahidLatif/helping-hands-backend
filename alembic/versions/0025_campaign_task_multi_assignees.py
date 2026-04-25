@@ -6,7 +6,7 @@ Revises: 0024_fee_policy_settlements
 
 from alembic import op
 
-revision = "0025_campaign_task_multi_assignees"
+revision = "0025_task_multi_assignees"
 down_revision = "0024_fee_policy_settlements"
 branch_labels = None
 depends_on = None

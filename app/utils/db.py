@@ -82,6 +82,13 @@ class _PooledConnection:
     def __getattr__(self, name):
         return getattr(object.__getattribute__(self, "_conn"), name)
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
+        return False
+
     def close(self):
         _get_pool().putconn(object.__getattribute__(self, "_conn"))
 

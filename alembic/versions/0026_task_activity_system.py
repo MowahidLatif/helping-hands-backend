@@ -7,7 +7,7 @@ Revises: 0025_campaign_task_multi_assignees
 from alembic import op
 
 revision = "0026_task_activity_system"
-down_revision = "0025_campaign_task_multi_assignees"
+down_revision = "0025_task_multi_assignees"
 branch_labels = None
 depends_on = None
 
