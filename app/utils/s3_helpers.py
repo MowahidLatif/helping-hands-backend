@@ -15,22 +15,20 @@ S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY") or (None if _is_prod else "minioadmin
 S3_SECRET_KEY = os.getenv("S3_SECRET_KEY") or (None if _is_prod else "minioadmin")
 S3_BUCKET = os.getenv("S3_BUCKET", "media-dev")
 
-if _is_prod and not S3_ACCESS_KEY:
-    raise RuntimeError("S3_ACCESS_KEY must be set in production")
-if _is_prod and not S3_SECRET_KEY:
-    raise RuntimeError("S3_SECRET_KEY must be set in production")
+# Allow empty keys in production — EC2 IAM role will be used automatically
 USE_PATH = os.getenv("S3_USE_PATH_STYLE", "true").lower() == "true"
 
 
 def _client():
-    return boto3.client(
-        "s3",
+    kwargs = dict(
         endpoint_url=S3_ENDPOINT,
         region_name=S3_REGION,
-        aws_access_key_id=S3_ACCESS_KEY,
-        aws_secret_access_key=S3_SECRET_KEY,
         config=Config(s3={"addressing_style": "path" if USE_PATH else "virtual"}),
     )
+    if S3_ACCESS_KEY and S3_ACCESS_KEY != "use-iam-role":
+        kwargs["aws_access_key_id"] = S3_ACCESS_KEY
+        kwargs["aws_secret_access_key"] = S3_SECRET_KEY
+    return boto3.client("s3", **kwargs)
 
 
 _slug_re = re.compile(r"[^a-z0-9]+")
