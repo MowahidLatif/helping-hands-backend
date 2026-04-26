@@ -2,6 +2,9 @@ from flask import Flask
 
 from app.routes import campaign_routes
 
+CAMP_ID = "00000000-0000-0000-0000-000000000001"
+TASK_ID = "00000000-0000-0000-0000-000000000002"
+
 
 def _unwrap_route(func):
     wrapped = func
@@ -21,7 +24,7 @@ def test_non_assignee_cannot_view_task_comments(monkeypatch):
     monkeypatch.setattr(
         "app.routes.campaign_routes.get_campaign_task",
         lambda _task_id, _campaign_id: {
-            "id": "task_1",
+            "id": TASK_ID,
             "assignees": [{"user_id": "member_2"}],
         },
     )
@@ -32,7 +35,7 @@ def test_non_assignee_cannot_view_task_comments(monkeypatch):
     )
 
     with app.test_request_context():
-        resp, status = route_fn("camp_1", "task_1")
+        resp, status = route_fn(CAMP_ID, TASK_ID)
 
     assert status == 403
     assert resp.get_json()["error"] == "forbidden"
@@ -50,7 +53,7 @@ def test_status_change_creates_system_comment(monkeypatch):
     monkeypatch.setattr(
         "app.routes.campaign_routes.get_campaign_task",
         lambda _task_id, _campaign_id: {
-            "id": "task_1",
+            "id": TASK_ID,
             "status_id": "s_old",
             "assignees": [{"user_id": "member_1"}],
         },
@@ -67,7 +70,7 @@ def test_status_change_creates_system_comment(monkeypatch):
     monkeypatch.setattr(
         "app.routes.campaign_routes.update_campaign_task",
         lambda *_args, **_kwargs: {
-            "id": "task_1",
+            "id": TASK_ID,
             "status_id": "s_new",
             "assignees": [{"user_id": "member_1"}],
         },
@@ -82,7 +85,7 @@ def test_status_change_creates_system_comment(monkeypatch):
     )
 
     with app.test_request_context(json={"status_id": "s_new"}):
-        _resp, status = route_fn("camp_1", "task_1")
+        _resp, status = route_fn(CAMP_ID, TASK_ID)
 
     assert status == 200
     assert captured["status_comment_called"] is True
@@ -99,7 +102,7 @@ def test_blocked_comment_creates_notification_intents(monkeypatch):
     )
     monkeypatch.setattr(
         "app.routes.campaign_routes.get_campaign_task",
-        lambda _task_id, _campaign_id: {"id": "task_1", "assignees": [{"user_id": "member_1"}]},
+        lambda _task_id, _campaign_id: {"id": TASK_ID, "assignees": [{"user_id": "member_1"}]},
     )
     monkeypatch.setattr("app.routes.campaign_routes.get_jwt_identity", lambda: "member_1")
     monkeypatch.setattr(
@@ -124,7 +127,7 @@ def test_blocked_comment_creates_notification_intents(monkeypatch):
     )
 
     with app.test_request_context(json={"comment_type": "blocked", "body": "Cannot proceed"}):
-        _resp, status = route_fn("camp_1", "task_1")
+        _resp, status = route_fn(CAMP_ID, TASK_ID)
 
     assert status == 201
     assert captured["recipients"] == ["owner_1", "admin_1"]
