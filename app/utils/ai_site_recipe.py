@@ -20,6 +20,12 @@ MAX_DONATE_LABEL_LEN = 120
 MAX_ALT_LEN = 500
 MAX_PROP_URL_LEN = 2048
 MAX_RECIPE_JSON_BYTES = 131_072  # 128 KiB
+MAX_IFRAME_HTML_BYTES = 98_304
+MAX_IFRAME_CSS_BYTES = 32_768
+MAX_IFRAME_JS_BYTES = 32_768
+MAX_IFRAME_CONTENT_FIELDS = 120
+MAX_IFRAME_CONTENT_KEY_LEN = 120
+MAX_IFRAME_CONTENT_VALUE_LEN = 8_000
 MAX_THEME_FONT_LEN = 80
 MAX_THEME_RADIUS_LEN = 20
 _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{3,8}$")
@@ -274,12 +280,86 @@ def _validate_theme(theme: Any) -> dict[str, Any] | None:
     return out if out else None
 
 
+def _validate_iframe_content_map(raw: Any) -> dict[str, str] | None:
+    if not isinstance(raw, dict):
+        return None
+    if len(raw) > MAX_IFRAME_CONTENT_FIELDS:
+        return None
+    out: dict[str, str] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str):
+            return None
+        key = key.strip()
+        if not key or len(key) > MAX_IFRAME_CONTENT_KEY_LEN:
+            return None
+        if not isinstance(value, str) or len(value) > MAX_IFRAME_CONTENT_VALUE_LEN:
+            return None
+        out[key] = value
+    return out
+
+
+def _validate_iframe_bundle(raw: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+    bundle_type = raw.get("type")
+    if bundle_type not in ("iframeBundle", "iframe_bundle"):
+        return None, "recipe.type must be iframeBundle or iframe_bundle"
+    version = raw.get("version")
+    if version not in ("1", 1):
+        return None, 'iframe bundle version must be "1"'
+    template = raw.get("template")
+    if not isinstance(template, dict):
+        return None, "iframe bundle template must be an object"
+    html = template.get("html")
+    if not isinstance(html, str) or not html.strip():
+        return None, "iframe bundle template.html must be a non-empty string"
+    if len(html.encode("utf-8")) > MAX_IFRAME_HTML_BYTES:
+        return None, f"template.html exceeds maximum size ({MAX_IFRAME_HTML_BYTES} bytes)"
+    css = template.get("css")
+    if css is not None and not isinstance(css, str):
+        return None, "template.css must be a string"
+    if isinstance(css, str) and len(css.encode("utf-8")) > MAX_IFRAME_CSS_BYTES:
+        return None, f"template.css exceeds maximum size ({MAX_IFRAME_CSS_BYTES} bytes)"
+    js = template.get("js")
+    if js is not None and not isinstance(js, str):
+        return None, "template.js must be a string"
+    if isinstance(js, str) and len(js.encode("utf-8")) > MAX_IFRAME_JS_BYTES:
+        return None, f"template.js exceeds maximum size ({MAX_IFRAME_JS_BYTES} bytes)"
+    content = _validate_iframe_content_map(raw.get("content"))
+    if content is None:
+        return None, "iframe bundle content must be an object of string fields"
+    published = raw.get("publishedContent")
+    if published is not None:
+        published = _validate_iframe_content_map(published)
+        if published is None:
+            return None, "iframe bundle publishedContent must be an object of string fields"
+    out: dict[str, Any] = {
+        "type": "iframeBundle",
+        "version": "1",
+        "template": {"html": html},
+        "content": content,
+    }
+    if isinstance(css, str):
+        out["template"]["css"] = css
+    if isinstance(js, str):
+        out["template"]["js"] = js
+    if published is not None:
+        out["publishedContent"] = published
+    try:
+        encoded = json.dumps(out, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return None, "recipe is not JSON-serializable"
+    if len(encoded.encode("utf-8")) > MAX_RECIPE_JSON_BYTES:
+        return None, f"recipe JSON exceeds maximum size ({MAX_RECIPE_JSON_BYTES} bytes)"
+    return out, None
+
+
 def validate_ai_site_recipe(raw: Any) -> tuple[dict[str, Any] | None, str | None]:
     """
     Returns (normalized_recipe, None) on success, or (None, error_message).
     """
     if not isinstance(raw, dict):
         return None, "recipe must be a JSON object"
+    if raw.get("type") in ("iframeBundle", "iframe_bundle"):
+        return _validate_iframe_bundle(raw)
     normalized = normalize_recipe(raw)
     version = normalized.get("version")
     if version != "1":

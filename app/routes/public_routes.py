@@ -61,7 +61,7 @@ def campaign_public(org_subdomain, camp_slug):
 
         cur.execute(
             """
-            SELECT id, title, slug,
+            SELECT id, title, slug, status,
                    COALESCE(goal, 0) AS goal,
                    COALESCE(total_raised, 0) AS total_raised,
                    giveaway_prize_cents,

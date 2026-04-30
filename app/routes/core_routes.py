@@ -53,7 +53,7 @@ def campaign_public_no_subdomain(org_subdomain, camp_slug):
         org_id = org_row[0]
         cur.execute(
             """
-            SELECT id, title, slug,
+            SELECT id, title, slug, status,
                    COALESCE(goal, 0) AS goal,
                    COALESCE(total_raised, 0) AS total_raised,
                    giveaway_prize_cents,
@@ -84,7 +84,7 @@ def campaign_public_by_id(campaign_id):
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
             """
-            SELECT id, title, slug,
+            SELECT id, title, slug, status,
                    COALESCE(goal, 0) AS goal,
                    COALESCE(total_raised, 0) AS total_raised,
                    giveaway_prize_cents,
