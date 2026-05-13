@@ -56,6 +56,10 @@ def test_create_task_owner_success(monkeypatch):
         lambda user_id, _org_id: "owner" if user_id == "owner_1" else "member",
     )
     monkeypatch.setattr(
+        "app.routes.campaign_routes.get_org_tier",
+        lambda _org_id: 2,
+    )
+    monkeypatch.setattr(
         "app.routes.campaign_routes.get_task_status",
         lambda _status_id, _org_id: {"id": _status_id},
     )

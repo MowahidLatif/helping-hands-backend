@@ -90,6 +90,12 @@ from app.services.settlement_service import (
     execute_campaign_payout,
     get_campaign_finance_summary,
 )
+from app.utils.tier_features import (
+    get_org_tier,
+    TIER_LIMITS,
+    check_campaign_creation_allowed,
+    check_ai_generation_allowed,
+)
 import csv
 import io
 
@@ -126,7 +132,6 @@ def create():
     role = get_user_role_in_org(user_id, org_id)
     if not user_has_permission(user_id, org_id, "campaign:create", role):
         return jsonify({"error": "forbidden: campaign:create required"}), 403
-    from app.utils.tier_features import check_campaign_creation_allowed, get_org_tier
     _tier_err = check_campaign_creation_allowed(org_id)
     if _tier_err:
         return jsonify({"error": _tier_err, "tier_gate": "max_active_campaigns"}), 403
@@ -339,7 +344,6 @@ def campaign_media(campaign_id):
 def draw_winner_route(campaign_id):
     camp = get_campaign(campaign_id)
     if camp:
-        from app.utils.tier_features import get_org_tier, TIER_LIMITS
         _tier = get_org_tier(str(camp["org_id"]))
         if not TIER_LIMITS[_tier]["giveaway"]:
             return jsonify({"error": "Giveaway is not available on your plan. Upgrade to Scale to run giveaways.", "tier_gate": "giveaway"}), 403
@@ -753,7 +757,6 @@ def create_update_route(campaign_id):
     role = get_user_role_in_org(get_jwt_identity(), camp["org_id"])
     if role not in ("admin", "owner"):
         return jsonify({"error": "admin or owner required"}), 403
-    from app.utils.tier_features import get_org_tier, TIER_LIMITS
     _tier = get_org_tier(str(camp["org_id"]))
     if not TIER_LIMITS[_tier]["campaign_updates"]:
         return jsonify({"error": "Campaign update posts are not available on the Starter plan. Upgrade to Grow or Scale.", "tier_gate": "campaign_updates"}), 403
@@ -932,7 +935,6 @@ def create_campaign_task_route(campaign_id):
         return jsonify({"error": "not a member"}), 403
     if role not in ("owner", "admin"):
         return jsonify({"error": "forbidden: owner/admin required"}), 403
-    from app.utils.tier_features import get_org_tier, TIER_LIMITS
     _tier = get_org_tier(str(org_id))
     if not TIER_LIMITS[_tier]["task_management"]:
         return jsonify({"error": "Task management is not available on the Starter plan. Upgrade to Grow or Scale.", "tier_gate": "task_management"}), 403
@@ -1337,7 +1339,6 @@ def ai_site_generate(campaign_id):
     if not user_has_permission(user_id, camp["org_id"], "campaign:edit", role):
         return jsonify({"error": "forbidden: campaign:edit required"}), 403
 
-    from app.utils.tier_features import check_ai_generation_allowed
     _ai_err = check_ai_generation_allowed(camp["org_id"])
     if _ai_err:
         return jsonify({"error": _ai_err, "tier_gate": "ai_generation"}), 403
