@@ -70,6 +70,12 @@ def signup_user(data: dict) -> dict:
         data.get("org_name") or data.get("organization_name") or ""
     ).strip() or None
     org_subdomain = (data.get("org_subdomain") or "").strip() or None
+    try:
+        org_tier = int(data.get("org_tier") or 1)
+        if org_tier not in (1, 2, 3):
+            org_tier = 1
+    except (TypeError, ValueError):
+        org_tier = 1
 
     if not EMAIL_RE.match(email):
         return {"error": "Invalid email format"}
@@ -81,7 +87,7 @@ def signup_user(data: dict) -> dict:
     user = create_user(email=email, password_hash=_hash_password(password), name=name)
     if not org_name:
         org_name = email.split("@", 1)[0] + "'s Org"
-    org = create_organization(org_name, subdomain=org_subdomain)
+    org = create_organization(org_name, subdomain=org_subdomain, tier=org_tier)
     add_user_to_org(org_id=org["id"], user_id=user["id"], role="owner")
 
     tokens = _make_tokens(user["id"], {"org_id": org["id"], "role": "owner"})

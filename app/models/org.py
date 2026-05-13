@@ -4,25 +4,26 @@ from app.utils.slug import slugify as _slugify
 import secrets
 
 
-def create_organization(name: str, subdomain: str | None = None):
+def create_organization(name: str, subdomain: str | None = None, tier: int = 1):
     sub = _slugify(subdomain or name) or f"org-{secrets.token_hex(3)}"
+    tier = int(tier) if tier in (1, 2, 3) else 1
 
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO organizations (name, subdomain) VALUES (%s, %s) "
-            "RETURNING id, name, subdomain",
-            (name, sub),
+            "INSERT INTO organizations (name, subdomain, tier) VALUES (%s, %s, %s) "
+            "RETURNING id, name, subdomain, tier",
+            (name, sub, tier),
         )
         row = cur.fetchone()
         conn.commit()
 
-    return {"id": row[0], "name": row[1], "subdomain": row[2]}
+    return {"id": row[0], "name": row[1], "subdomain": row[2], "tier": row[3]}
 
 
 def get_organization(org_id: str) -> dict[str, Any] | None:
     sql = """
       SELECT id, name, subdomain, stripe_connect_account_id, payout_account_ready,
-             payout_onboarding_status, payouts_enabled, created_at, updated_at
+             payout_onboarding_status, payouts_enabled, created_at, updated_at, tier
       FROM organizations
       WHERE id = %s
     """
@@ -41,7 +42,18 @@ def get_organization(org_id: str) -> dict[str, Any] | None:
             "payouts_enabled": bool(row[6]),
             "created_at": row[7],
             "updated_at": row[8],
+            "tier": int(row[9]) if row[9] is not None else 1,
         }
+
+
+def update_org_tier(org_id: str, tier: int) -> dict[str, Any] | None:
+    tier = int(tier) if tier in (1, 2, 3) else 1
+    sql = "UPDATE organizations SET tier = %s, updated_at = now() WHERE id = %s RETURNING id, tier"
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (tier, org_id))
+        row = cur.fetchone()
+        conn.commit()
+        return {"id": row[0], "tier": row[1]} if row else None
 
 
 def list_user_organizations(user_id: str) -> list[dict[str, Any]]:

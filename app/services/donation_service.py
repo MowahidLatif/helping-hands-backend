@@ -58,10 +58,12 @@ def start_checkout(
         donor_email=(donor_email or None),
         message=(message or None),
     )
+    from app.utils.tier_features import get_org_tier
+    org_tier = get_org_tier(str(camp["org_id"]))
     stripe_fee_estimate = estimate_stripe_processing_fee_cents(charge_amount_cents)
     checkout_accounting = build_donation_accounting(
         fee_option=fee_option,
-        campaign_total_dollars=float(camp.get("total_raised") or 0),
+        org_tier=org_tier,
         amount_cents=base_amount_cents,
         stripe_processing_fee_cents=stripe_fee_estimate,
     )

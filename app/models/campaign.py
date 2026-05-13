@@ -280,19 +280,17 @@ def record_platform_fee_if_goal_reached(campaign_id: str) -> bool:
     If campaign has reached its goal and no fee has been recorded yet,
     calculate and record the platform fee. Returns True if fee was recorded.
     """
-    from app.services.fee_policy_service import (
-        get_platform_fee_percent,
-        normalize_fee_option,
-    )
+    from app.services.fee_policy_service import get_platform_fee_percent
+    from app.utils.tier_features import get_org_tier
 
-    sql = """SELECT goal, total_raised, platform_fee_recorded_at, fee_option
-             FROM campaigns WHERE id = %s"""
+    sql = """SELECT c.goal, c.total_raised, c.platform_fee_recorded_at, c.org_id
+             FROM campaigns c WHERE c.id = %s"""
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, (campaign_id,))
         row = cur.fetchone()
         if not row:
             return False
-        goal, total_raised, fee_recorded_at, fee_option = (
+        goal, total_raised, fee_recorded_at, org_id = (
             float(row[0]),
             float(row[1]),
             row[2],
@@ -300,10 +298,8 @@ def record_platform_fee_if_goal_reached(campaign_id: str) -> bool:
         )
         if fee_recorded_at is not None or goal <= 0 or total_raised < goal:
             return False
-        pct = get_platform_fee_percent(
-            fee_option=normalize_fee_option(fee_option),
-            campaign_total_dollars=total_raised,
-        )
+        org_tier = get_org_tier(str(org_id))
+        pct = get_platform_fee_percent(org_tier)
         fee_cents = int(round(total_raised * (pct / 100.0) * 100))
         cur.execute(
             """UPDATE campaigns

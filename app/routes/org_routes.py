@@ -6,6 +6,7 @@ from app.models.org import (
     list_user_organizations,
     get_organization,
     update_organization_name,
+    update_org_tier,
     delete_organization,
     upsert_org_payout_account,
 )
@@ -200,6 +201,10 @@ def members(org_id):
 @require_org_role("admin", "owner")
 def create_member(org_id):
     """Create a new user and add to org with optional permissions. Body: email, password, name, permissions[]."""
+    from app.utils.tier_features import check_member_add_allowed
+    _tier_err = check_member_add_allowed(org_id)
+    if _tier_err:
+        return jsonify({"error": _tier_err, "tier_gate": "team_members"}), 403
     data = request.get_json(silent=True) or {}
     email = (data.get("email") or "").strip().lower()
     password = (data.get("password") or "").strip()
@@ -234,6 +239,10 @@ def create_member(org_id):
 @orgs.post("/api/orgs/<org_id>/members")
 @require_org_role("admin", "owner")
 def add_member(org_id):
+    from app.utils.tier_features import check_member_add_allowed
+    _tier_err = check_member_add_allowed(org_id)
+    if _tier_err:
+        return jsonify({"error": _tier_err, "tier_gate": "team_members"}), 403
     email = (request.json or {}).get("email", "").strip().lower()
     role = (request.json or {}).get("role", "member")
     user = get_user_by_email(email)
@@ -372,6 +381,50 @@ def patch_org_email_settings(org_id):
     payload = request.get_json(force=True, silent=True) or {}
     updated = upsert_email_settings(org_id, **payload)
     return jsonify(updated)
+
+
+@orgs.get("/api/orgs/<org_id>/tier-info")
+@require_org_role()
+def get_org_tier_info(org_id):
+    from app.utils.tier_features import (
+        TIER_LIMITS,
+        get_org_tier,
+        count_active_campaigns,
+        count_org_members,
+        count_ai_generations,
+    )
+    tier = get_org_tier(org_id)
+    limits = TIER_LIMITS[tier]
+    active_campaigns = count_active_campaigns(org_id)
+    member_count = count_org_members(org_id)
+    use_monthly = (limits["ai_gen_per_month"] is not None)
+    ai_gens_used = count_ai_generations(org_id, month=use_monthly)
+    return jsonify({
+        "tier": tier,
+        "tier_name": limits["name"],
+        "limits": limits,
+        "usage": {
+            "active_campaigns": active_campaigns,
+            "member_count": member_count,
+            "ai_gens_used": ai_gens_used,
+        },
+    }), 200
+
+
+@orgs.patch("/api/orgs/<org_id>/tier")
+@require_org_role("owner")
+def patch_org_tier(org_id):
+    body = request.get_json(silent=True) or {}
+    try:
+        tier = int(body.get("tier") or 0)
+    except (TypeError, ValueError):
+        tier = 0
+    if tier not in (1, 2, 3):
+        return jsonify({"error": "tier must be 1, 2, or 3"}), 400
+    result = update_org_tier(org_id, tier)
+    if not result:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(result), 200
 
 
 @orgs.patch("/api/orgs/<org_id>/subdomain")
