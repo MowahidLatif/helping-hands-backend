@@ -421,6 +421,45 @@ def patch_org_tier(org_id):
         tier = 0
     if tier not in (1, 2, 3):
         return jsonify({"error": "tier must be 1, 2, or 3"}), 400
+
+    # Check for in-flight campaigns (non-completed, non-archived).
+    # If any exist and the caller hasn't explicitly acknowledged, return the list
+    # so the frontend can show the acknowledgment modal.
+    acknowledged = bool(body.get("acknowledged"))
+    if not acknowledged:
+        from app.utils.db import get_db_connection as _get_db
+        from app.utils.tier_features import TIER_LIMITS
+        sql = """
+            SELECT id, title, locked_tier, status
+            FROM campaigns
+            WHERE org_id = %s AND status NOT IN ('completed', 'archived')
+            ORDER BY created_at DESC
+        """
+        with _get_db() as conn, conn.cursor() as cur:
+            cur.execute(sql, (org_id,))
+            rows = cur.fetchall()
+        if rows:
+            campaigns_info = [
+                {
+                    "id": r[0],
+                    "title": r[1],
+                    "locked_tier": int(r[2]) if r[2] is not None else 1,
+                    "locked_tier_name": TIER_LIMITS.get(int(r[2]) if r[2] else 1, {}).get("name", "Starter"),
+                    "locked_fee_percent": TIER_LIMITS.get(int(r[2]) if r[2] else 1, {}).get("platform_fee_percent", 3.0),
+                    "status": r[3],
+                }
+                for r in rows
+            ]
+            return jsonify({
+                "requires_acknowledgment": True,
+                "message": (
+                    "You have campaigns currently running on your account. "
+                    "They will continue to be billed at the tier they were started on. "
+                    "Acknowledge to proceed."
+                ),
+                "campaigns": campaigns_info,
+            }), 409
+
     result = update_org_tier(org_id, tier)
     if not result:
         return jsonify({"error": "not found"}), 404

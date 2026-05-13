@@ -58,12 +58,12 @@ def start_checkout(
         donor_email=(donor_email or None),
         message=(message or None),
     )
-    from app.utils.tier_features import get_org_tier
-    org_tier = get_org_tier(str(camp["org_id"]))
+    # Use the tier locked at campaign creation — never the org's current tier.
+    locked_tier = int(camp.get("locked_tier") or 1)
     stripe_fee_estimate = estimate_stripe_processing_fee_cents(charge_amount_cents)
     checkout_accounting = build_donation_accounting(
         fee_option=fee_option,
-        org_tier=org_tier,
+        org_tier=locked_tier,
         amount_cents=base_amount_cents,
         stripe_processing_fee_cents=stripe_fee_estimate,
     )

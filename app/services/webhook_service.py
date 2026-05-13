@@ -193,11 +193,11 @@ def _apply_status_update(
                 stripe_fee_cents = estimate_stripe_processing_fee_cents(
                     charge_amount_cents
                 )
-            from app.utils.tier_features import get_org_tier
-            _org_tier = get_org_tier(str(campaign.get("org_id") or ""))
+            # Use the tier locked at campaign creation — never the org's current tier.
+            _locked_tier = int(campaign.get("locked_tier") or 1)
             accounting = build_donation_accounting(
                 fee_option=fee_option,
-                org_tier=_org_tier,
+                org_tier=_locked_tier,
                 amount_cents=int((d or {}).get("amount_cents") or 0),
                 stripe_processing_fee_cents=int(stripe_fee_cents),
             )

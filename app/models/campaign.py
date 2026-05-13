@@ -110,16 +110,20 @@ def create_campaign(
     giveaway_prize_cents: int | None = None,
     fee_option: str = "donor_pays",
     fee_policy_version: str = "v1",
+    locked_tier: int = 1,
 ) -> dict[str, Any]:
     slug = unique_slug_for_org(org_id, title)
     normalized_status = (status or "draft").strip().lower()
+    locked_tier_val = int(locked_tier) if locked_tier in (1, 2, 3) else 1
     sql = """
     INSERT INTO campaigns (
-      org_id, title, slug, goal, status, custom_domain, giveaway_prize_cents, fee_option, fee_policy_version
+      org_id, title, slug, goal, status, custom_domain, giveaway_prize_cents,
+      fee_option, fee_policy_version, locked_tier
     )
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     RETURNING id, org_id, title, slug, goal, status, custom_domain, total_raised,
-              fee_option, fee_policy_version, giveaway_prize_cents, created_at, updated_at
+              fee_option, fee_policy_version, giveaway_prize_cents, locked_tier,
+              created_at, updated_at
     """
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -134,6 +138,7 @@ def create_campaign(
                 giveaway_prize_cents,
                 fee_option,
                 fee_policy_version,
+                locked_tier_val,
             ),
         )
         row = cur.fetchone()
@@ -150,6 +155,7 @@ def create_campaign(
             "fee_option",
             "fee_policy_version",
             "giveaway_prize_cents",
+            "locked_tier",
             "created_at",
             "updated_at",
         ]
@@ -160,7 +166,8 @@ def get_campaign(campaign_id: str) -> dict[str, Any] | None:
     sql = """SELECT id, org_id, title, slug, goal, status, custom_domain, total_raised,
              fee_option, fee_policy_version,
              platform_fee_cents, platform_fee_percent, platform_fee_recorded_at,
-             giveaway_prize_cents, page_layout, ai_site_recipe, created_at, updated_at
+             giveaway_prize_cents, page_layout, ai_site_recipe, locked_tier,
+             created_at, updated_at
              FROM campaigns WHERE id = %s"""
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, (campaign_id,))
@@ -184,6 +191,7 @@ def get_campaign(campaign_id: str) -> dict[str, Any] | None:
             "giveaway_prize_cents",
             "page_layout",
             "ai_site_recipe",
+            "locked_tier",
             "created_at",
             "updated_at",
         ]
@@ -239,7 +247,8 @@ def list_campaigns(
     SELECT id, org_id, title, slug, goal, status, custom_domain, total_raised,
            fee_option, fee_policy_version,
            platform_fee_cents, platform_fee_percent, platform_fee_recorded_at,
-           giveaway_prize_cents, page_layout, ai_site_recipe, created_at, updated_at
+           giveaway_prize_cents, page_layout, ai_site_recipe, locked_tier,
+           created_at, updated_at
     FROM campaigns
     WHERE org_id = %s
     """
@@ -269,6 +278,7 @@ def list_campaigns(
             "giveaway_prize_cents",
             "page_layout",
             "ai_site_recipe",
+            "locked_tier",
             "created_at",
             "updated_at",
         ]
@@ -281,25 +291,23 @@ def record_platform_fee_if_goal_reached(campaign_id: str) -> bool:
     calculate and record the platform fee. Returns True if fee was recorded.
     """
     from app.services.fee_policy_service import get_platform_fee_percent
-    from app.utils.tier_features import get_org_tier
 
-    sql = """SELECT c.goal, c.total_raised, c.platform_fee_recorded_at, c.org_id
+    sql = """SELECT c.goal, c.total_raised, c.platform_fee_recorded_at, c.locked_tier
              FROM campaigns c WHERE c.id = %s"""
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, (campaign_id,))
         row = cur.fetchone()
         if not row:
             return False
-        goal, total_raised, fee_recorded_at, org_id = (
+        goal, total_raised, fee_recorded_at, locked_tier = (
             float(row[0]),
             float(row[1]),
             row[2],
-            row[3],
+            int(row[3]) if row[3] is not None else 1,
         )
         if fee_recorded_at is not None or goal <= 0 or total_raised < goal:
             return False
-        org_tier = get_org_tier(str(org_id))
-        pct = get_platform_fee_percent(org_tier)
+        pct = get_platform_fee_percent(locked_tier)
         fee_cents = int(round(total_raised * (pct / 100.0) * 100))
         cur.execute(
             """UPDATE campaigns
@@ -355,7 +363,7 @@ def update_campaign(
     if not sets:
         return get_campaign(campaign_id)
     sets.append("updated_at = now()")
-    sql = f"UPDATE campaigns SET {', '.join(sets)} WHERE id = %s RETURNING id, org_id, title, slug, goal, status, custom_domain, total_raised, fee_option, fee_policy_version, platform_fee_cents, platform_fee_percent, platform_fee_recorded_at, giveaway_prize_cents, page_layout, ai_site_recipe, created_at, updated_at"
+    sql = f"UPDATE campaigns SET {', '.join(sets)} WHERE id = %s RETURNING id, org_id, title, slug, goal, status, custom_domain, total_raised, fee_option, fee_policy_version, platform_fee_cents, platform_fee_percent, platform_fee_recorded_at, giveaway_prize_cents, page_layout, ai_site_recipe, locked_tier, created_at, updated_at"
     params.append(campaign_id)
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, tuple(params))
@@ -380,6 +388,7 @@ def update_campaign(
             "giveaway_prize_cents",
             "page_layout",
             "ai_site_recipe",
+            "locked_tier",
             "created_at",
             "updated_at",
         ]

@@ -126,10 +126,11 @@ def create():
     role = get_user_role_in_org(user_id, org_id)
     if not user_has_permission(user_id, org_id, "campaign:create", role):
         return jsonify({"error": "forbidden: campaign:create required"}), 403
-    from app.utils.tier_features import check_campaign_creation_allowed
+    from app.utils.tier_features import check_campaign_creation_allowed, get_org_tier
     _tier_err = check_campaign_creation_allowed(org_id)
     if _tier_err:
         return jsonify({"error": _tier_err, "tier_gate": "max_active_campaigns"}), 403
+    locked_tier = get_org_tier(org_id)
     goal = float(body.get("goal") or 0)
     status = (body.get("status") or "draft").strip().lower()
     if status not in VALID_CAMPAIGN_STATUSES:
@@ -163,6 +164,7 @@ def create():
             custom_domain=custom_domain,
             giveaway_prize_cents=giveaway_prize_cents,
             fee_option=fee_option,
+            locked_tier=locked_tier,
         )
         return jsonify(camp), 201
     except Exception as e:
