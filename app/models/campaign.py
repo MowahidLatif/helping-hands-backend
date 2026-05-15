@@ -599,3 +599,17 @@ def list_giveaway_logs(campaign_id: str, limit: int = 20) -> list[dict]:
                 }
             )
         return result
+
+
+def update_active_campaigns_locked_tier(org_id: str, new_tier: int) -> int:
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE campaigns
+            SET locked_tier = %s
+            WHERE org_id = %s AND status NOT IN ('completed', 'cancelled', 'archived')
+            """,
+            (new_tier, org_id),
+        )
+        conn.commit()
+        return cur.rowcount

@@ -432,7 +432,7 @@ def patch_org_tier(org_id):
         sql = """
             SELECT id, title, locked_tier, status
             FROM campaigns
-            WHERE org_id = %s AND status NOT IN ('completed', 'archived')
+            WHERE org_id = %s AND status NOT IN ('completed', 'cancelled', 'archived')
             ORDER BY created_at DESC
         """
         with _get_db() as conn, conn.cursor() as cur:
@@ -453,17 +453,19 @@ def patch_org_tier(org_id):
             return jsonify({
                 "requires_acknowledgment": True,
                 "message": (
-                    "You have campaigns currently running on your account. "
-                    "They will continue to be billed at the tier they were started on. "
+                    "You have active campaigns on your account. "
+                    "Their fee rate will be updated to the new plan rate immediately. "
                     "Acknowledge to proceed."
                 ),
                 "campaigns": campaigns_info,
             }), 409
 
+    from app.models.campaign import update_active_campaigns_locked_tier
     result = update_org_tier(org_id, tier)
     if not result:
         return jsonify({"error": "not found"}), 404
-    return jsonify(result), 200
+    updated_count = update_active_campaigns_locked_tier(org_id, tier)
+    return jsonify({**result, "active_campaigns_updated": updated_count}), 200
 
 
 @orgs.patch("/api/orgs/<org_id>/subdomain")
