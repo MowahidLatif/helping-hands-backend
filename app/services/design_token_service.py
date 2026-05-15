@@ -12,9 +12,11 @@ import urllib.parse
 from collections import Counter
 from typing import Any
 
+from app.utils.secrets import get_secret_or_env
+
 logger = logging.getLogger(__name__)
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_API_KEY = get_secret_or_env("OPENAI_API_KEY", secret_name_env="OPENAI_SECRET_NAME")
 OPENAI_MODEL = os.getenv("OPENAI_AI_SITE_MODEL", "gpt-4o-mini")
 
 _HEX_RE = re.compile(r"#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b")

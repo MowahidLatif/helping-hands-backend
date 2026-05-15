@@ -18,10 +18,11 @@ from app.models.media import list_media_for_campaign
 from app.utils.ai_media_selection import select_media_for_ai_prompt
 from app.utils.ai_site_recipe import recipe_schema_description, validate_ai_site_recipe
 from app.utils.prompt_sanitize import sanitize_asset_description
+from app.utils.secrets import get_secret_or_env
 
 logger = logging.getLogger(__name__)
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_API_KEY = get_secret_or_env("OPENAI_API_KEY", secret_name_env="OPENAI_SECRET_NAME")
 OPENAI_MODEL = os.getenv("OPENAI_AI_SITE_MODEL", "gpt-4o-mini")
 MAX_USER_PROMPT_LEN = 8000
 # Balanced round-robin cap (see ai_media_selection); override with OPENAI_AI_SITE_MAX_ASSETS (1–80)
