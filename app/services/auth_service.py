@@ -1,4 +1,5 @@
 import os
+import logging
 from datetime import timedelta
 
 from app.models.user import (
@@ -24,6 +25,7 @@ from app.models.org import create_organization
 from app.models.org_user import add_user_to_org, get_primary_org_role
 
 EMAIL_RE = re.compile(r"^[^@]+@[^@]+\.[^@]+$")
+logger = logging.getLogger(__name__)
 
 
 def _normalize_email(email: str) -> str:
@@ -39,6 +41,23 @@ def _verify_password(password: str, password_hash: str) -> bool:
         return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
     except Exception:
         return False
+
+
+def _is_production() -> bool:
+    env = (os.getenv("APP_ENV") or os.getenv("FLASK_ENV") or "development").lower()
+    return env in {"prod", "production"}
+
+
+def _frontend_url_for_password_reset() -> str | None:
+    frontend_url = (os.getenv("FRONTEND_URL") or "").strip().rstrip("/")
+    if frontend_url:
+        return frontend_url
+    if _is_production():
+        logger.error(
+            "FRONTEND_URL is not set in production; skipping password reset email link generation."
+        )
+        return None
+    return "http://localhost:5173"
 
 
 def _make_tokens(
@@ -239,8 +258,10 @@ def request_password_reset(email: str) -> dict:
     email = _normalize_email(email)
     user = get_user_by_email(email)
     if user:
+        frontend_url = _frontend_url_for_password_reset()
+        if not frontend_url:
+            return {"message": "If that email is registered, a reset link has been sent."}
         raw_token = create_reset_token(str(user["id"]))
-        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
         reset_link = f"{frontend_url}/reset-credentials?token={raw_token}"
         body_text = (
             f"Hi,\n\nYou requested a password reset.\n\n"

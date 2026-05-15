@@ -48,6 +48,10 @@ def _parse_cors_origins() -> list[str]:
     return [origin.strip() for origin in raw.split(",") if origin.strip()]
 
 
+def _parse_frontend_url() -> str:
+    return (os.getenv("FRONTEND_URL") or "").strip().rstrip("/")
+
+
 def create_app():
     _logger = logging.getLogger("app.startup")
 
@@ -70,6 +74,11 @@ def create_app():
     if is_production and cors_origins == _DEV_CORS_ORIGINS:
         raise RuntimeError(
             "CORS_ALLOWED_ORIGINS must be set in production (comma-separated origins)."
+        )
+    frontend_url = _parse_frontend_url()
+    if is_production and not frontend_url:
+        raise RuntimeError(
+            "FRONTEND_URL must be set in production (e.g. https://app.example.com)."
         )
 
     if server_name:

@@ -13,6 +13,29 @@ PORT=5050 poetry run python run.py
 
 > **Note:** For local dev, leave `SERVER_NAME` unset so requests to `127.0.0.1:5050` work. If you set `SERVER_NAME` (e.g. for subdomain testing), it must match the request Host exactly or Flask will return 404.
 
+## Production environment requirements
+
+Set these env vars before running in production:
+
+- `JWT_SECRET` (strong random value, minimum 32 chars)
+- `CORS_ALLOWED_ORIGINS` (comma-separated frontend origins allowed by browsers)
+- `FRONTEND_URL` (base URL used for password reset links)
+- Email provider configuration:
+  - SendGrid: `EMAIL_PROVIDER=sendgrid` and `SENDGRID_API_KEY`
+  - SES: `EMAIL_PROVIDER=ses` and valid AWS credentials/role with SES send permissions
+
+Startup safety checks:
+
+- App startup will fail in production if `JWT_SECRET` is weak/missing.
+- App startup will fail in production if `CORS_ALLOWED_ORIGINS` is missing.
+- App startup will fail in production if `FRONTEND_URL` is missing.
+
+Recommended verification after deploy:
+
+1. Call `POST /api/auth/forgot-password` for a test user and confirm the link uses your real frontend domain.
+2. Confirm browser API requests from your frontend origin succeed (no CORS errors).
+3. Confirm one test email is sent successfully (receipt or password reset).
+
 ## Testing
 
 ### 1. Seed test data
