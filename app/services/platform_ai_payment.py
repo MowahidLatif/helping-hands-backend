@@ -9,8 +9,7 @@ import uuid
 
 import stripe
 
-STRIPE_SECRET = os.getenv("STRIPE_SECRET_KEY", "")
-CURRENCY = os.getenv("STRIPE_CURRENCY", "usd")
+from app.utils.stripe_config import STRIPE_SECRET_KEY as STRIPE_SECRET, STRIPE_CURRENCY as CURRENCY
 DEFAULT_AMOUNT_CENTS = int(os.getenv("STRIPE_AI_GENERATION_AMOUNT_CENTS", "500"))
 
 

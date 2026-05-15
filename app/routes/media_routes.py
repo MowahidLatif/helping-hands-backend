@@ -20,6 +20,7 @@ from app.utils.s3_helpers import (
     delete_object,
 )
 from app.utils.embed import validate_embed_url, embed_url_to_iframe_src
+from app.utils.tier_features import TIER_LIMITS, get_org_tier
 from app.utils.media_validators import (
     validate_content_type,
     validate_filename,
@@ -90,6 +91,9 @@ def signed_url():
     if role not in ("admin", "owner"):
         return jsonify({"error": "forbidden"}), 403
 
+    if not TIER_LIMITS[get_org_tier(campaign["org_id"])].get("media_uploads"):
+        return jsonify({"error": "Media uploads require the Grow plan or above.", "tier_gate": "media_uploads"}), 403
+
     key = make_key(campaign["org_id"], campaign_id, filename)
     signed = presign_put(key, content_type)
     return jsonify({"key": key, **signed}), 200
@@ -115,6 +119,9 @@ def upload():
     role = get_user_role_in_org(get_jwt_identity(), campaign["org_id"])
     if role not in ("admin", "owner"):
         return jsonify({"error": "forbidden"}), 403
+
+    if not TIER_LIMITS[get_org_tier(campaign["org_id"])].get("media_uploads"):
+        return jsonify({"error": "Media uploads require the Grow plan or above.", "tier_gate": "media_uploads"}), 403
 
     file = request.files.get("file")
     if not file or not file.filename:
@@ -254,6 +261,9 @@ def persist():
     role = get_user_role_in_org(get_jwt_identity(), campaign["org_id"])
     if role not in ("admin", "owner"):
         return jsonify({"error": "forbidden"}), 403
+
+    if not TIER_LIMITS[get_org_tier(campaign["org_id"])].get("media_uploads"):
+        return jsonify({"error": "Media uploads require the Grow plan or above.", "tier_gate": "media_uploads"}), 403
 
     if mtype == "embed":
         url = (body.get("url") or "").strip()

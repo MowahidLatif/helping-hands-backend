@@ -28,9 +28,8 @@ from app.services.fee_policy_service import (
 )
 from app.services.settlement_service import reconcile_payout_event
 
-STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "").strip()
+from app.utils.stripe_config import STRIPE_SECRET_KEY as STRIPE_SECRET, STRIPE_WEBHOOK_SECRET
 DEV_SKIP = os.getenv("DEV_STRIPE_NO_VERIFY") == "1"
-STRIPE_SECRET = os.getenv("STRIPE_SECRET_KEY", "").strip()
 
 
 def _mask_email(e: str | None) -> str | None:

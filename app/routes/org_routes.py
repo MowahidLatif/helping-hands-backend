@@ -150,7 +150,7 @@ def create_org_payout_onboarding_link(org_id):
     account_id = org.get("stripe_connect_account_id")
     if not account_id:
         return jsonify({"error": "stripe_connect_account_id not set"}), 400
-    stripe_secret = (os.getenv("STRIPE_SECRET_KEY") or "").strip()
+    from app.utils.stripe_config import STRIPE_SECRET_KEY as stripe_secret
     refresh_url = (os.getenv("STRIPE_CONNECT_REFRESH_URL") or "").strip()
     return_url = (os.getenv("STRIPE_CONNECT_RETURN_URL") or "").strip()
     if not stripe_secret or not refresh_url or not return_url:

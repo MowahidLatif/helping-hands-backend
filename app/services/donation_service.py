@@ -14,8 +14,7 @@ from app.services.fee_policy_service import (
     normalize_fee_option,
 )
 
-CURRENCY = os.getenv("STRIPE_CURRENCY", "usd")
-STRIPE_SECRET = os.getenv("STRIPE_SECRET_KEY", "")
+from app.utils.stripe_config import STRIPE_SECRET_KEY as STRIPE_SECRET, STRIPE_CURRENCY as CURRENCY
 
 
 def _to_cents(amount: float) -> int:

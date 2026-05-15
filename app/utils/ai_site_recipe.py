@@ -425,7 +425,7 @@ Return ONLY valid JSON (no markdown) matching this shape:
 
 Each node: { "id": "unique-string", "type": "<type>", "props": { ... } }
 
-Required: include at least one "donate_section" and one "progress_section" so visitors can donate and see fundraising progress.
+Required: include at least one "donate_section" and one "progress_section". Place the progress_section within the first 3 nodes (right after the hero) so visitors immediately see fundraising progress.
 
 IMPORTANT for all image/video URLs (hero.background_image_url, image.url, video.url, gallery item urls):
 Use ONLY the exact "url" strings from the "Available media assets" list in the user message. Do not invent or use external URLs.

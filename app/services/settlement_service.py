@@ -19,8 +19,7 @@ from app.models.settlement import (
 )
 from app.services.fee_policy_service import FEE_POLICY_VERSION, normalize_fee_option
 
-STRIPE_SECRET = (os.getenv("STRIPE_SECRET_KEY") or "").strip()
-STRIPE_CURRENCY = (os.getenv("STRIPE_CURRENCY") or "usd").strip().lower()
+from app.utils.stripe_config import STRIPE_SECRET_KEY as STRIPE_SECRET, STRIPE_CURRENCY
 
 
 def _serialize(out: dict[str, Any] | None) -> dict[str, Any] | None:
