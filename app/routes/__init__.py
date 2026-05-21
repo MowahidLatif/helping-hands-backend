@@ -8,6 +8,7 @@ from .webhook_routes import webhooks_bp
 from .public_routes import public
 from .admin_routes import admin_bp
 from .contact_routes import contact_bp
+from .waitlist_routes import waitlist_bp
 
 __all__ = [
     "auth_bp",
@@ -20,4 +21,5 @@ __all__ = [
     "public",
     "admin_bp",
     "contact_bp",
+    "waitlist_bp",
 ]

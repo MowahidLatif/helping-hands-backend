@@ -21,6 +21,7 @@ from app.routes import (
     public,
     admin_bp,
     contact_bp,
+    waitlist_bp,
 )
 from app.routes.platform_routes import platform_bp
 from app.realtime import init_socketio
@@ -230,6 +231,7 @@ def create_app():
     app.register_blueprint(admin_bp)
     app.register_blueprint(contact_bp)
     app.register_blueprint(platform_bp)
+    app.register_blueprint(waitlist_bp, url_prefix="/api/waitlist")
 
     if os.getenv("PRINT_URL_MAP", "0") == "1":
         _logger.info("=== URL MAP ===")
