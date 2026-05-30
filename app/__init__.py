@@ -53,6 +53,17 @@ def _parse_frontend_url() -> str:
     return (os.getenv("FRONTEND_URL") or "").strip().rstrip("/")
 
 
+def _parse_socketio_cors_origins() -> list[str]:
+    raw = (os.getenv("SOCKETIO_CORS_ORIGINS") or os.getenv("CORS_ALLOWED_ORIGINS") or "").strip()
+    if not raw:
+        return _DEV_CORS_ORIGINS
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
+def _env_flag_enabled(name: str, default: str = "0") -> bool:
+    return (os.getenv(name, default) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def create_app():
     _logger = logging.getLogger("app.startup")
 
@@ -81,6 +92,19 @@ def create_app():
         raise RuntimeError(
             "FRONTEND_URL must be set in production (e.g. https://app.example.com)."
         )
+    socketio_cors_origins = _parse_socketio_cors_origins()
+    if is_production and socketio_cors_origins == _DEV_CORS_ORIGINS:
+        raise RuntimeError(
+            "SOCKETIO_CORS_ORIGINS (or CORS_ALLOWED_ORIGINS) must be set in production."
+        )
+    if is_production and _env_flag_enabled("DEV_EMAIL_LOG_ONLY", "0"):
+        raise RuntimeError(
+            "DEV_EMAIL_LOG_ONLY cannot be enabled in production."
+        )
+    if is_production and _env_flag_enabled("DEV_STRIPE_NO_VERIFY", "0"):
+        raise RuntimeError(
+            "DEV_STRIPE_NO_VERIFY cannot be enabled in production."
+        )
 
     if server_name:
         app.config["SERVER_NAME"] = server_name
@@ -96,6 +120,30 @@ def create_app():
         raise RuntimeError(
             "JWT_SECRET must be set to a strong value (>= 32 chars) in production."
         )
+    if is_production:
+        from app.utils.stripe_config import STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET
+        from app.utils.email_sender import validate_email_configuration
+        from app.utils.secrets import get_secret_or_env
+
+        if not STRIPE_SECRET_KEY:
+            raise RuntimeError(
+                "Stripe is not configured: set STRIPE_SECRET_NAME or STRIPE_SECRET_KEY in production."
+            )
+        if not STRIPE_WEBHOOK_SECRET:
+            raise RuntimeError(
+                "Stripe webhooks are not configured: set STRIPE_SECRET_NAME/STRIPE_WEBHOOK_SECRET in production."
+            )
+        openai_key = get_secret_or_env(
+            "OPENAI_API_KEY",
+            secret_name_env="OPENAI_SECRET_NAME",
+        )
+        if not openai_key:
+            raise RuntimeError(
+                "OpenAI is not configured: set OPENAI_SECRET_NAME or OPENAI_API_KEY in production."
+            )
+        email_ok, email_err = validate_email_configuration(strict=True)
+        if not email_ok:
+            raise RuntimeError(f"Email is not configured for production: {email_err}")
     app.config["JWT_SECRET_KEY"] = jwt_secret
     app.config["JWT_TOKEN_LOCATION"] = ["cookies", "headers"]
     app.config["JWT_HEADER_NAME"] = "Authorization"

@@ -1,13 +1,11 @@
-import json
 import os
 from logging.config import fileConfig
 from urllib.parse import quote_plus
 
-import boto3
 from alembic import context
-from botocore.exceptions import ClientError
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, pool
+from app.utils.secrets import get_secret_or_env
 
 load_dotenv()
 
@@ -17,19 +15,12 @@ if config.config_file_name is not None:
 
 
 def _get_password() -> str:
-    """Fetch password from AWS Secrets Manager if DB_SECRET_NAME is set, else use DB_PASSWORD."""
-    secret_name = os.getenv("DB_SECRET_NAME")
-    if secret_name:
-        region = os.getenv("AWS_REGION", "us-east-2")
-        client = boto3.session.Session().client(
-            service_name="secretsmanager", region_name=region
-        )
-        try:
-            response = client.get_secret_value(SecretId=secret_name)
-            return json.loads(response["SecretString"])["password"]
-        except ClientError as e:
-            raise RuntimeError(f"Failed to fetch DB secret '{secret_name}': {e}") from e
-    return os.getenv("DB_PASSWORD", "dev")
+    """Fetch DB password using the same AWS-first path as runtime DB connections."""
+    return get_secret_or_env(
+        "DB_PASSWORD",
+        secret_name_env="DB_SECRET_NAME",
+        json_keys=("password",),
+    ) or "dev"
 
 
 def _build_url() -> str:

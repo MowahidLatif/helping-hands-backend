@@ -11,9 +11,52 @@ Configure via env:
 from __future__ import annotations
 import os
 from typing import Tuple, Optional
+from app.utils.secrets import get_secret_or_env
 
 DEFAULT_FROM_EMAIL = os.getenv("FROM_EMAIL", "no-reply@example.com")
 DEFAULT_FROM_NAME = os.getenv("FROM_NAME", "Donations")
+SENDGRID_API_KEY = get_secret_or_env(
+    "SENDGRID_API_KEY", secret_name_env="SENDGRID_SECRET_NAME"
+)
+
+
+def resolve_email_provider() -> str | None:
+    provider = os.getenv("EMAIL_PROVIDER", "").strip().lower()
+    if provider:
+        return provider
+    if SENDGRID_API_KEY:
+        return "sendgrid"
+    if os.getenv("AWS_REGION") or os.getenv("AWS_ACCESS_KEY_ID"):
+        return "ses"
+    return None
+
+
+def validate_email_configuration(*, strict: bool = False) -> tuple[bool, str | None]:
+    """
+    Validate whether email delivery has enough configuration to operate.
+    strict=True is intended for production startup guards.
+    """
+    provider = resolve_email_provider()
+    if not provider:
+        return (
+            False,
+            "EMAIL_PROVIDER is not set and no SENDGRID key or SES credentials are available.",
+        )
+    if provider == "sendgrid" and not SENDGRID_API_KEY:
+        return (
+            False,
+            "Email provider is sendgrid but no SENDGRID key is configured.",
+        )
+    if provider == "ses" and not (os.getenv("AWS_REGION") or os.getenv("AWS_ACCESS_KEY_ID")):
+        return (
+            False,
+            "Email provider is ses but no AWS region/credentials were found.",
+        )
+    if provider not in {"sendgrid", "ses"}:
+        return False, f"Unknown EMAIL_PROVIDER: {provider}"
+    if strict and provider == "ses" and not os.getenv("AWS_REGION"):
+        return False, "EMAIL_PROVIDER=ses requires AWS_REGION."
+    return True, None
 
 
 def send_email(
@@ -34,14 +77,9 @@ def send_email(
     from_addr = from_email or DEFAULT_FROM_EMAIL
     from_display = from_name or DEFAULT_FROM_NAME
 
-    provider = os.getenv("EMAIL_PROVIDER", "").lower()
+    provider = resolve_email_provider()
     if not provider:
-        if os.getenv("SENDGRID_API_KEY"):
-            provider = "sendgrid"
-        elif os.getenv("AWS_REGION") or os.getenv("AWS_ACCESS_KEY_ID"):
-            provider = "ses"
-        else:
-            return None, "EMAIL_PROVIDER not set and no SENDGRID_API_KEY or AWS creds"
+        return None, "EMAIL_PROVIDER not set and no SendGrid or SES configuration found"
 
     if provider == "sendgrid":
         return _send_via_sendgrid(
@@ -83,7 +121,7 @@ def _send_via_sendgrid(
         from sendgrid import SendGridAPIClient
         from sendgrid.helpers.mail import Mail, Email, To, Content, Bcc, ReplyTo
 
-        api_key = os.getenv("SENDGRID_API_KEY", "").strip()
+        api_key = SENDGRID_API_KEY.strip()
         if not api_key:
             return None, "SENDGRID_API_KEY not set"
 

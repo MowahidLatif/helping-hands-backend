@@ -3,8 +3,29 @@ from flask_socketio import SocketIO, join_room, leave_room, emit
 from flask import request
 from flask_jwt_extended import decode_token
 
-_raw = os.getenv("SOCKETIO_CORS_ORIGINS", "*").strip()
-CORS_ORIGINS = "*" if _raw == "*" else [o.strip() for o in _raw.split(",") if o.strip()]
+_DEV_CORS_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+
+
+def _is_production() -> bool:
+    env = (os.getenv("APP_ENV") or os.getenv("FLASK_ENV") or "development").lower()
+    return env in {"prod", "production"}
+
+
+def _parse_socketio_cors_origins():
+    raw = (os.getenv("SOCKETIO_CORS_ORIGINS") or os.getenv("CORS_ALLOWED_ORIGINS") or "").strip()
+    if raw:
+        return [o.strip() for o in raw.split(",") if o.strip()]
+    if _is_production():
+        return []
+    return _DEV_CORS_ORIGINS
+
+
+CORS_ORIGINS = _parse_socketio_cors_origins()
 REQUIRE_AUTH = os.getenv("SOCKETIO_REQUIRE_AUTH", "0") == "1"
 
 socketio = SocketIO(

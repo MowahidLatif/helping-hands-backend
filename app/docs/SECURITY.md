@@ -2,17 +2,17 @@
 
 ## CORS
 
-- [x] CORS configured for known origins (`http://localhost:3000`, `http://127.0.0.1:3000`)
+- [x] CORS configured via `CORS_ALLOWED_ORIGINS` with localhost defaults only in development
 - [x] `supports_credentials=True` for cookie/auth
-- [ ] Production: add deployed frontend origins to CORS config
-- [ ] Ensure no `Access-Control-Allow-Origin: *` with credentials
+- [x] Production startup check enforces non-localhost API CORS origins
+- [x] Socket.IO CORS defaults to API CORS and is guarded in production
 
 ## JWT
 
 - [x] JWT_ACCESS_TOKEN_EXPIRES = 15 minutes
 - [x] JWT_REFRESH_TOKEN_EXPIRES = 30 days
 - [x] Tokens in Authorization header (Bearer)
-- [ ] Production: set strong JWT_SECRET (min 32 bytes, random)
+- [x] Production startup check enforces strong `JWT_SECRET` (>= 32 chars)
 - [ ] Consider shorter refresh token expiry for sensitive apps
 
 ## S3 / MinIO
@@ -36,7 +36,7 @@
 - [x] Webhook signature verification when STRIPE_WEBHOOK_SECRET set
 - [x] Event deduplication via stripe_events table
 - [x] Webhook route exempt from rate limiting
-- [ ] Production: always set STRIPE_WEBHOOK_SECRET
+- [x] Production startup check requires Stripe API + webhook secrets
 
 ## Rate Limiting
 
@@ -56,7 +56,8 @@
 
 - [ ] Ensure .env not committed
 - [ ] Rotate API keys periodically
-- [ ] Use secret manager (e.g. AWS Secrets Manager) in production
+- [x] AWS Secrets Manager support for DB/Stripe/OpenAI/SendGrid via `*_SECRET_NAME`
+- [x] Production startup checks enforce required secrets and reject unsafe DEV flags
 
 ## API Exposure
 

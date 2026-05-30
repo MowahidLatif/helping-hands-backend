@@ -1,38 +1,25 @@
-import json
 import psycopg2
 import psycopg2.pool
 import os
 from dotenv import load_dotenv
+from app.utils.secrets import get_secret_or_env
 
 load_dotenv()
 
 _pool: psycopg2.pool.ThreadedConnectionPool | None = None
 
 
-def _fetch_secret_password() -> str | None:
+def _resolve_db_password() -> str:
     """
-    Fetch the DB password from AWS Secrets Manager when DB_SECRET_NAME is set.
-    RDS-managed secrets are JSON: {"username": "...", "password": "..."}
-    Falls back to DB_PASSWORD if DB_SECRET_NAME is not set.
+    Resolve DB password with AWS-first behavior.
+    If DB_SECRET_NAME is set, reads from Secrets Manager (supports JSON field 'password').
+    Falls back to DB_PASSWORD for local/offline development.
     """
-    secret_name = os.getenv("DB_SECRET_NAME")
-    if not secret_name:
-        return None
-
-    import boto3
-    from botocore.exceptions import ClientError
-
-    region = os.getenv("AWS_REGION", "us-east-2")
-    client = boto3.session.Session().client(
-        service_name="secretsmanager", region_name=region
-    )
-    try:
-        response = client.get_secret_value(SecretId=secret_name)
-    except ClientError as e:
-        raise RuntimeError(f"Failed to fetch DB secret '{secret_name}': {e}") from e
-
-    secret = json.loads(response["SecretString"])
-    return secret["password"]
+    return get_secret_or_env(
+        "DB_PASSWORD",
+        secret_name_env="DB_SECRET_NAME",
+        json_keys=("password",),
+    ) or "dev"
 
 
 def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
@@ -58,8 +45,7 @@ def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
                     url = f"{url}&sslrootcert={sslrootcert}"
             _pool = psycopg2.pool.ThreadedConnectionPool(minconn, maxconn, dsn=url)
         else:
-            # Prefer Secrets Manager; fall back to DB_PASSWORD for local dev
-            password = _fetch_secret_password() or os.getenv("DB_PASSWORD", "dev")
+            password = _resolve_db_password()
             _pool = psycopg2.pool.ThreadedConnectionPool(
                 minconn,
                 maxconn,

@@ -17,24 +17,52 @@ PORT=5050 poetry run python run.py
 
 Set these env vars before running in production:
 
+- `APP_ENV=production` (or `FLASK_ENV=production`) to enable production startup guards
 - `JWT_SECRET` (strong random value, minimum 32 chars)
 - `CORS_ALLOWED_ORIGINS` (comma-separated frontend origins allowed by browsers)
+- `SOCKETIO_CORS_ORIGINS` (optional; defaults to `CORS_ALLOWED_ORIGINS`)
 - `FRONTEND_URL` (base URL used for password reset links)
+- Stripe configuration:
+  - `STRIPE_SECRET_NAME` (preferred, AWS Secrets Manager) or plain `STRIPE_SECRET_KEY`
+  - webhook signing secret via `STRIPE_SECRET_NAME` JSON or plain `STRIPE_WEBHOOK_SECRET`
+- OpenAI configuration:
+  - `OPENAI_SECRET_NAME` (preferred, AWS Secrets Manager) or plain `OPENAI_API_KEY`
 - Email provider configuration:
-  - SendGrid: `EMAIL_PROVIDER=sendgrid` and `SENDGRID_API_KEY`
+  - SendGrid: `EMAIL_PROVIDER=sendgrid` and `SENDGRID_SECRET_NAME` (preferred) or `SENDGRID_API_KEY`
   - SES: `EMAIL_PROVIDER=ses` and valid AWS credentials/role with SES send permissions
 
 Startup safety checks:
 
 - App startup will fail in production if `JWT_SECRET` is weak/missing.
 - App startup will fail in production if `CORS_ALLOWED_ORIGINS` is missing.
+- App startup will fail in production if Socket.IO CORS falls back to localhost defaults.
 - App startup will fail in production if `FRONTEND_URL` is missing.
+- App startup will fail in production if Stripe/OpenAI/email config is missing.
+- App startup will fail in production if `DEV_EMAIL_LOG_ONLY=1` or `DEV_STRIPE_NO_VERIFY=1`.
+
+## Secrets Manager (AWS-first for local + prod)
+
+This backend supports AWS-first secret resolution. For each integration, set `*_SECRET_NAME` to the
+Secrets Manager entry, and keep plain API keys as fallback for offline/local-only development.
+
+Recommended secret mappings:
+
+- `STRIPE_SECRET_NAME` -> JSON with `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`
+- `OPENAI_SECRET_NAME` -> plain string or JSON containing `OPENAI_API_KEY`
+- `SENDGRID_SECRET_NAME` -> plain string or JSON containing `SENDGRID_API_KEY`
+- `DB_SECRET_NAME` -> JSON containing `password` (RDS-managed format)
+
+To use AWS Secrets Manager in both local and prod, your runtime identity needs:
+
+- `secretsmanager:GetSecretValue` permission for the referenced secrets
+- correct `AWS_REGION`
 
 Recommended verification after deploy:
 
 1. Call `POST /api/auth/forgot-password` for a test user and confirm the link uses your real frontend domain.
 2. Confirm browser API requests from your frontend origin succeed (no CORS errors).
 3. Confirm one test email is sent successfully (receipt or password reset).
+4. Confirm Stripe webhook signatures are being verified (do not enable `DEV_STRIPE_NO_VERIFY`).
 
 ## Testing
 

@@ -43,21 +43,14 @@ def _verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
-def _is_production() -> bool:
-    env = (os.getenv("APP_ENV") or os.getenv("FLASK_ENV") or "development").lower()
-    return env in {"prod", "production"}
-
-
 def _frontend_url_for_password_reset() -> str | None:
     frontend_url = (os.getenv("FRONTEND_URL") or "").strip().rstrip("/")
     if frontend_url:
         return frontend_url
-    if _is_production():
-        logger.error(
-            "FRONTEND_URL is not set in production; skipping password reset email link generation."
-        )
-        return None
-    return "http://localhost:5173"
+    logger.error(
+        "FRONTEND_URL is not set; skipping password reset email link generation."
+    )
+    return None
 
 
 def _make_tokens(
