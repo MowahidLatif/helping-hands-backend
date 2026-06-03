@@ -123,8 +123,26 @@ def count_ai_generations(org_id: str, month: bool = False) -> int:
         return int(cur.fetchone()[0])
 
 
+def check_subscription_active(org_id: str) -> str | None:
+    """Return error if org needs an active subscription to use paid features."""
+    from app.models.org import get_organization
+    from app.services.billing_service import org_has_active_billing, billing_required
+
+    org = get_organization(org_id)
+    if not org:
+        return "Organization not found."
+    if billing_required(org):
+        return "An active subscription is required. Subscribe in Settings to continue."
+    if not org_has_active_billing(org):
+        return "An active subscription is required. Subscribe in Settings to continue."
+    return None
+
+
 def check_ai_generation_allowed(org_id: str) -> str | None:
     """Return an error message string if generation is not allowed, else None."""
+    sub_err = check_subscription_active(org_id)
+    if sub_err:
+        return sub_err
     tier = get_org_tier(org_id)
     limits = TIER_LIMITS[tier]
     if limits["ai_gen_lifetime"] is not None:
@@ -142,6 +160,9 @@ def check_ai_generation_allowed(org_id: str) -> str | None:
 
 def check_campaign_creation_allowed(org_id: str) -> str | None:
     """Return an error message string if campaign creation is not allowed, else None."""
+    sub_err = check_subscription_active(org_id)
+    if sub_err:
+        return sub_err
     tier = get_org_tier(org_id)
     limits = TIER_LIMITS[tier]
     max_active = limits["max_active_campaigns"]

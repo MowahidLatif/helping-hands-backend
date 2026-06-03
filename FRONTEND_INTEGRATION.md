@@ -99,6 +99,15 @@ GET /api/campaigns/{id}/progress
   Returns: { goal, total_raised, percent, donations_count, fee_option, net_to_org_cents, platform_fee_cents (0 for v3), ... }
 ```
 
+### Org billing (Stripe subscriptions)
+- POST /api/orgs/{id}/billing/setup
+- POST /api/orgs/{id}/billing/checkout  Body: { tier: 1|2|3 } → { url }
+- POST /api/orgs/{id}/billing/change-tier
+- POST /api/orgs/{id}/billing/portal → { url }
+- GET /api/orgs/{id}/billing/status
+
+Sign-up flow: register → billing/setup → billing/checkout → Stripe → /settings/billing/success
+
 ### Page Layout Endpoints
 ```
 GET /api/campaigns/{id}/page-layout

@@ -99,7 +99,13 @@ def signup_user(data: dict) -> dict:
     user = create_user(email=email, password_hash=_hash_password(password), name=name)
     if not org_name:
         org_name = email.split("@", 1)[0] + "'s Org"
-    org = create_organization(org_name, subdomain=org_subdomain, tier=org_tier)
+    org = create_organization(
+        org_name,
+        subdomain=org_subdomain,
+        tier=1,
+        pending_tier=org_tier,
+        subscription_status="none",
+    )
     add_user_to_org(org_id=org["id"], user_id=user["id"], role="owner")
 
     tokens = _make_tokens(user["id"], {"org_id": org["id"], "role": "owner"})

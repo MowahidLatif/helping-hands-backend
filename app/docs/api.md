@@ -67,6 +67,18 @@ Checkout and donation records expose `fee_preview` / accounting fields. `platfor
 
 Tiers gate features only; they do not affect donation payout math.
 
+## Stripe Billing (org subscriptions)
+
+- POST /orgs/{orgId}/billing/setup — create platform Customer + Connect Express account
+- POST /orgs/{orgId}/billing/checkout — body `{ tier: 1|2|3 }`, returns `{ url }` for Stripe Checkout
+- POST /orgs/{orgId}/billing/change-tier — upgrade/downgrade existing subscription (or checkout if none)
+- POST /orgs/{orgId}/billing/portal — returns Customer Portal `{ url }`
+- GET /orgs/{orgId}/billing/status — subscription + Connect payout status
+
+Webhook events (same POST /webhooks/stripe endpoint): `checkout.session.completed`, `customer.subscription.*`, `invoice.paid`, `invoice.payment_failed`, `account.updated`.
+
+Configure `STRIPE_PRICE_STARTER`, `STRIPE_PRICE_GROW`, `STRIPE_PRICE_SCALE` and billing redirect URLs in env.
+
 ## Webhooks
 - POST /webhooks/stripe
 

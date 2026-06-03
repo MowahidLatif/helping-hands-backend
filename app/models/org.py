@@ -1,49 +1,97 @@
 from typing import Any
+from datetime import datetime
 from app.utils.db import get_db_connection
 from app.utils.slug import slugify as _slugify
 import secrets
 
+_ORG_SELECT_COLS = """
+  id, name, subdomain, stripe_connect_account_id, payout_account_ready,
+  payout_onboarding_status, payouts_enabled, created_at, updated_at, tier,
+  stripe_customer_id, stripe_subscription_id, subscription_status,
+  subscription_current_period_end, pending_tier
+"""
 
-def create_organization(name: str, subdomain: str | None = None, tier: int = 1):
+
+def _row_to_org(row: tuple) -> dict[str, Any]:
+    return {
+        "id": row[0],
+        "name": row[1],
+        "subdomain": row[2],
+        "stripe_connect_account_id": row[3],
+        "payout_account_ready": bool(row[4]),
+        "payout_onboarding_status": row[5],
+        "payouts_enabled": bool(row[6]),
+        "created_at": row[7],
+        "updated_at": row[8],
+        "tier": int(row[9]) if row[9] is not None else 1,
+        "stripe_customer_id": row[10],
+        "stripe_subscription_id": row[11],
+        "subscription_status": row[12] or "legacy",
+        "subscription_current_period_end": row[13],
+        "pending_tier": int(row[14]) if row[14] is not None else None,
+    }
+
+
+def create_organization(
+    name: str,
+    subdomain: str | None = None,
+    tier: int = 1,
+    *,
+    pending_tier: int | None = None,
+    subscription_status: str = "none",
+):
     sub = _slugify(subdomain or name) or f"org-{secrets.token_hex(3)}"
     tier = int(tier) if tier in (1, 2, 3) else 1
+    pending = int(pending_tier) if pending_tier in (1, 2, 3) else None
+    status = (subscription_status or "none").strip().lower()
 
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO organizations (name, subdomain, tier) VALUES (%s, %s, %s) "
-            "RETURNING id, name, subdomain, tier",
-            (name, sub, tier),
+            """
+            INSERT INTO organizations (
+              name, subdomain, tier, pending_tier, subscription_status
+            ) VALUES (%s, %s, %s, %s, %s)
+            RETURNING id, name, subdomain, tier, pending_tier, subscription_status
+            """,
+            (name, sub, tier, pending, status),
         )
         row = cur.fetchone()
         conn.commit()
 
-    return {"id": row[0], "name": row[1], "subdomain": row[2], "tier": row[3]}
+    return {
+        "id": row[0],
+        "name": row[1],
+        "subdomain": row[2],
+        "tier": row[3],
+        "pending_tier": row[4],
+        "subscription_status": row[5],
+    }
 
 
 def get_organization(org_id: str) -> dict[str, Any] | None:
-    sql = """
-      SELECT id, name, subdomain, stripe_connect_account_id, payout_account_ready,
-             payout_onboarding_status, payouts_enabled, created_at, updated_at, tier
-      FROM organizations
-      WHERE id = %s
-    """
+    sql = f"SELECT {_ORG_SELECT_COLS} FROM organizations WHERE id = %s"
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, (org_id,))
         row = cur.fetchone()
         if not row:
             return None
-        return {
-            "id": row[0],
-            "name": row[1],
-            "subdomain": row[2],
-            "stripe_connect_account_id": row[3],
-            "payout_account_ready": bool(row[4]),
-            "payout_onboarding_status": row[5],
-            "payouts_enabled": bool(row[6]),
-            "created_at": row[7],
-            "updated_at": row[8],
-            "tier": int(row[9]) if row[9] is not None else 1,
-        }
+        return _row_to_org(row)
+
+
+def get_organization_by_stripe_customer(customer_id: str) -> dict[str, Any] | None:
+    sql = f"SELECT {_ORG_SELECT_COLS} FROM organizations WHERE stripe_customer_id = %s"
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (customer_id,))
+        row = cur.fetchone()
+        return _row_to_org(row) if row else None
+
+
+def get_organization_by_connect_account(account_id: str) -> dict[str, Any] | None:
+    sql = f"SELECT {_ORG_SELECT_COLS} FROM organizations WHERE stripe_connect_account_id = %s"
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (account_id,))
+        row = cur.fetchone()
+        return _row_to_org(row) if row else None
 
 
 def update_org_tier(org_id: str, tier: int) -> dict[str, Any] | None:
@@ -54,6 +102,74 @@ def update_org_tier(org_id: str, tier: int) -> dict[str, Any] | None:
         row = cur.fetchone()
         conn.commit()
         return {"id": row[0], "tier": row[1]} if row else None
+
+
+def update_org_billing(
+    org_id: str,
+    *,
+    stripe_customer_id: str | None = None,
+    stripe_connect_account_id: str | None = None,
+    pending_tier: int | None = None,
+) -> dict[str, Any] | None:
+    sets: list[str] = []
+    params: list[Any] = []
+    if stripe_customer_id is not None:
+        sets.append("stripe_customer_id = %s")
+        params.append(stripe_customer_id)
+    if stripe_connect_account_id is not None:
+        sets.append("stripe_connect_account_id = %s")
+        params.append(stripe_connect_account_id)
+    if pending_tier is not None:
+        sets.append("pending_tier = %s")
+        params.append(int(pending_tier) if pending_tier in (1, 2, 3) else None)
+    if not sets:
+        return get_organization(org_id)
+    sets.append("updated_at = now()")
+    sql = f"UPDATE organizations SET {', '.join(sets)} WHERE id = %s RETURNING id"
+    params.append(org_id)
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, tuple(params))
+        row = cur.fetchone()
+        conn.commit()
+        return get_organization(str(row[0])) if row else None
+
+
+def update_org_subscription(
+    org_id: str,
+    *,
+    stripe_subscription_id: str | None = None,
+    subscription_status: str | None = None,
+    subscription_current_period_end: datetime | None = None,
+    tier: int | None = None,
+    pending_tier: int | None = ...,  # type: ignore[assignment]
+) -> dict[str, Any] | None:
+    sets: list[str] = []
+    params: list[Any] = []
+    if stripe_subscription_id is not None:
+        sets.append("stripe_subscription_id = %s")
+        params.append(stripe_subscription_id)
+    if subscription_status is not None:
+        sets.append("subscription_status = %s")
+        params.append(subscription_status)
+    if subscription_current_period_end is not None:
+        sets.append("subscription_current_period_end = %s")
+        params.append(subscription_current_period_end)
+    if tier is not None:
+        sets.append("tier = %s")
+        params.append(int(tier) if tier in (1, 2, 3) else 1)
+    if pending_tier is not ...:
+        sets.append("pending_tier = %s")
+        params.append(int(pending_tier) if pending_tier in (1, 2, 3) else None)
+    if not sets:
+        return get_organization(org_id)
+    sets.append("updated_at = now()")
+    sql = f"UPDATE organizations SET {', '.join(sets)} WHERE id = %s RETURNING id"
+    params.append(org_id)
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, tuple(params))
+        row = cur.fetchone()
+        conn.commit()
+        return get_organization(str(row[0])) if row else None
 
 
 def list_user_organizations(user_id: str) -> list[dict[str, Any]]:
@@ -103,31 +219,13 @@ def upsert_org_payout_account(
     if not sets:
         return get_organization(org_id)
     sets.append("updated_at = now()")
-    sql = f"""
-      UPDATE organizations
-      SET {", ".join(sets)}
-      WHERE id = %s
-      RETURNING id, name, subdomain, stripe_connect_account_id, payout_account_ready,
-                payout_onboarding_status, payouts_enabled, created_at, updated_at
-    """
+    sql = f"UPDATE organizations SET {', '.join(sets)} WHERE id = %s RETURNING id"
     params.append(org_id)
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, tuple(params))
         row = cur.fetchone()
         conn.commit()
-        if not row:
-            return None
-        return {
-            "id": row[0],
-            "name": row[1],
-            "subdomain": row[2],
-            "stripe_connect_account_id": row[3],
-            "payout_account_ready": bool(row[4]),
-            "payout_onboarding_status": row[5],
-            "payouts_enabled": bool(row[6]),
-            "created_at": row[7],
-            "updated_at": row[8],
-        }
+        return get_organization(str(row[0])) if row else None
 
 
 def delete_organization(org_id: str) -> bool:

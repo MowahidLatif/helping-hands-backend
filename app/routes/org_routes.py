@@ -144,40 +144,15 @@ def patch_org_payout_account(org_id):
 @orgs.post("/api/orgs/<org_id>/payout-account/onboarding-link")
 @require_org_role("admin", "owner")
 def create_org_payout_onboarding_link(org_id):
-    org = get_organization(org_id)
-    if not org:
-        return jsonify({"error": "not found"}), 404
-    account_id = org.get("stripe_connect_account_id")
-    if not account_id:
-        return jsonify({"error": "stripe_connect_account_id not set"}), 400
-    from app.utils.stripe_config import STRIPE_SECRET_KEY as stripe_secret
-    refresh_url = (os.getenv("STRIPE_CONNECT_REFRESH_URL") or "").strip()
-    return_url = (os.getenv("STRIPE_CONNECT_RETURN_URL") or "").strip()
-    if not stripe_secret or not refresh_url or not return_url:
-        return (
-            jsonify(
-                {
-                    "error": "missing STRIPE_SECRET_KEY, STRIPE_CONNECT_REFRESH_URL, or STRIPE_CONNECT_RETURN_URL"
-                }
-            ),
-            400,
-        )
-    try:
-        import stripe
+    from app.services.connect_service import create_connect_onboarding_link
 
-        stripe.api_key = stripe_secret
-        link = stripe.AccountLink.create(
-            account=account_id,
-            refresh_url=refresh_url,
-            return_url=return_url,
-            type="account_onboarding",
-        )
-        return (
-            jsonify({"url": link.get("url"), "expires_at": link.get("expires_at")}),
-            200,
-        )
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 400
+    result = create_connect_onboarding_link(org_id)
+    if result.get("error"):
+        code = 400
+        if result["error"] == "organization not found":
+            code = 404
+        return jsonify(result), code
+    return jsonify(result), 200
 
 
 @orgs.delete("/api/orgs/<org_id>")
@@ -393,6 +368,8 @@ def get_org_tier_info(org_id):
         count_org_members,
         count_ai_generations,
     )
+    from app.services.billing_service import billing_required
+    org = get_organization(org_id)
     tier = get_org_tier(org_id)
     limits = TIER_LIMITS[tier]
     active_campaigns = count_active_campaigns(org_id)
@@ -408,12 +385,30 @@ def get_org_tier_info(org_id):
             "member_count": member_count,
             "ai_gens_used": ai_gens_used,
         },
+        "subscription_status": org.get("subscription_status") if org else "legacy",
+        "subscription_current_period_end": (
+            org["subscription_current_period_end"].isoformat()
+            if org and org.get("subscription_current_period_end")
+            else None
+        ),
+        "pending_tier": org.get("pending_tier") if org else None,
+        "billing_required": billing_required(org),
     }), 200
 
 
 @orgs.patch("/api/orgs/<org_id>/tier")
 @require_org_role("owner")
 def patch_org_tier(org_id):
+    org = get_organization(org_id)
+    if not org:
+        return jsonify({"error": "not found"}), 404
+    status = (org.get("subscription_status") or "legacy").strip().lower()
+    if status != "legacy":
+        return jsonify({
+            "error": "use billing checkout to change plan",
+            "checkout_required": True,
+        }), 402
+
     body = request.get_json(silent=True) or {}
     try:
         tier = int(body.get("tier") or 0)
@@ -495,3 +490,90 @@ def set_org_subdomain(org_id):
             return jsonify({"error": "not found"}), 404
 
     return jsonify({"id": row[0], "name": row[1], "subdomain": row[2]}), 200
+
+
+@orgs.post("/api/orgs/<org_id>/billing/setup")
+@require_org_role("owner")
+def billing_setup(org_id):
+    from app.models.user import get_user_by_id
+    from app.services.billing_service import setup_billing
+
+    user_id = get_jwt_identity()
+    user = get_user_by_id(user_id)
+    if not user:
+        return jsonify({"error": "user not found"}), 404
+    org = get_organization(org_id)
+    if not org:
+        return jsonify({"error": "not found"}), 404
+    result = setup_billing(org_id, user["email"], org.get("name"))
+    if result.get("error"):
+        return jsonify(result), 400
+    return jsonify(result), 200
+
+
+@orgs.post("/api/orgs/<org_id>/billing/checkout")
+@require_org_role("owner")
+def billing_checkout(org_id):
+    from app.models.user import get_user_by_id
+    from app.services.billing_service import create_subscription_checkout
+
+    body = request.get_json(silent=True) or {}
+    try:
+        tier = int(body.get("tier") or 0)
+    except (TypeError, ValueError):
+        tier = 0
+    if tier not in (1, 2, 3):
+        return jsonify({"error": "tier must be 1, 2, or 3"}), 400
+    user_id = get_jwt_identity()
+    user = get_user_by_id(user_id)
+    if not user:
+        return jsonify({"error": "user not found"}), 404
+    result = create_subscription_checkout(org_id, tier, user["email"])
+    if result.get("error"):
+        return jsonify(result), 400
+    return jsonify(result), 200
+
+
+@orgs.post("/api/orgs/<org_id>/billing/change-tier")
+@require_org_role("owner")
+def billing_change_tier(org_id):
+    from app.models.user import get_user_by_id
+    from app.services.billing_service import change_subscription_tier
+
+    body = request.get_json(silent=True) or {}
+    try:
+        tier = int(body.get("tier") or 0)
+    except (TypeError, ValueError):
+        tier = 0
+    if tier not in (1, 2, 3):
+        return jsonify({"error": "tier must be 1, 2, or 3"}), 400
+    user_id = get_jwt_identity()
+    user = get_user_by_id(user_id)
+    if not user:
+        return jsonify({"error": "user not found"}), 404
+    result = change_subscription_tier(org_id, tier, user["email"])
+    if result.get("error"):
+        return jsonify(result), 400
+    return jsonify(result), 200
+
+
+@orgs.post("/api/orgs/<org_id>/billing/portal")
+@require_org_role("owner")
+def billing_portal(org_id):
+    from app.services.billing_service import create_billing_portal_session
+
+    result = create_billing_portal_session(org_id)
+    if result.get("error"):
+        return jsonify(result), 400
+    return jsonify(result), 200
+
+
+@orgs.get("/api/orgs/<org_id>/billing/status")
+@require_org_role("admin", "owner")
+def billing_status(org_id):
+    from app.services.billing_service import get_billing_status
+
+    result = get_billing_status(org_id)
+    if result.get("error"):
+        return jsonify(result), 404
+    return jsonify(result), 200

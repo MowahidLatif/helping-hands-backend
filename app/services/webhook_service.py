@@ -346,4 +346,50 @@ def process_stripe_event(
             print("[payout reconcile error]", str(e))
         return 200, {"ok": True}
 
+    if ev_type == "checkout.session.completed":
+        try:
+            from app.services.billing_service import handle_checkout_session_completed
+            handle_checkout_session_completed(obj or {})
+        except Exception as e:
+            print("[billing checkout error]", str(e))
+        return 200, {"ok": True}
+
+    if ev_type in {
+        "customer.subscription.created",
+        "customer.subscription.updated",
+        "customer.subscription.deleted",
+    }:
+        try:
+            from app.services.billing_service import handle_subscription_event
+            handle_subscription_event(obj or {})
+        except Exception as e:
+            print("[billing subscription error]", str(e))
+        return 200, {"ok": True}
+
+    if ev_type == "invoice.paid":
+        try:
+            from app.services.billing_service import handle_invoice_paid
+            handle_invoice_paid(obj or {})
+        except Exception as e:
+            print("[billing invoice paid error]", str(e))
+        return 200, {"ok": True}
+
+    if ev_type == "invoice.payment_failed":
+        try:
+            from app.services.billing_service import handle_invoice_payment_failed
+            handle_invoice_payment_failed(obj or {})
+        except Exception as e:
+            print("[billing invoice failed error]", str(e))
+        return 200, {"ok": True}
+
+    if ev_type == "account.updated":
+        try:
+            from app.services.connect_service import sync_connect_account_status
+            account_id = (obj or {}).get("id")
+            if account_id:
+                sync_connect_account_status(str(account_id))
+        except Exception as e:
+            print("[connect account sync error]", str(e))
+        return 200, {"ok": True}
+
     return 200, {"ignored": ev_type or "unknown"}
