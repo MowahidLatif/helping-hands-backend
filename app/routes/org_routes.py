@@ -445,7 +445,6 @@ def patch_org_tier(org_id):
                     "title": r[1],
                     "locked_tier": int(r[2]) if r[2] is not None else 1,
                     "locked_tier_name": TIER_LIMITS.get(int(r[2]) if r[2] else 1, {}).get("name", "Starter"),
-                    "locked_fee_percent": TIER_LIMITS.get(int(r[2]) if r[2] else 1, {}).get("platform_fee_percent", 3.0),
                     "status": r[3],
                 }
                 for r in rows
@@ -454,7 +453,7 @@ def patch_org_tier(org_id):
                 "requires_acknowledgment": True,
                 "message": (
                     "You have active campaigns on your account. "
-                    "Their fee rate will be updated to the new plan rate immediately. "
+                    "Plan features and limits for these campaigns will update immediately. "
                     "Acknowledge to proceed."
                 ),
                 "campaigns": campaigns_info,

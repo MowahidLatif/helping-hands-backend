@@ -1,25 +1,25 @@
 """
 Org tier definitions and feature-gate helpers.
 
-Tier 1 (Starter)  — 3% platform fee
-Tier 2 (Grow)     — 4% platform fee
-Tier 3 (Scale)    — 5% platform fee
+Tier 1 (Starter)  — $10/month
+Tier 2 (Grow)     — $40/month
+Tier 3 (Scale)    — $100/month
+
+Tiers gate features only. Donation payouts have no platform fee (v3 fee policy).
 """
 
 from __future__ import annotations
 from typing import Any
 from app.utils.db import get_db_connection
 
-CANCELLATION_FEE_PERCENT = 5.0
-
 TIER_LIMITS: dict[int, dict[str, Any]] = {
     1: {
         "name": "Starter",
-        "platform_fee_percent": 3.0,
-        "max_active_campaigns": 2,
+        "monthly_price": 10,
+        "max_active_campaigns": 1,
         "max_members": 1,
-        "ai_gen_lifetime": 3,
-        "ai_gen_per_month": None,
+        "ai_gen_lifetime": None,
+        "ai_gen_per_month": 3,
         "task_management": False,
         "task_management_full": False,
         "email_marketing": False,
@@ -32,16 +32,16 @@ TIER_LIMITS: dict[int, dict[str, Any]] = {
     },
     2: {
         "name": "Grow",
-        "platform_fee_percent": 4.0,
-        "max_active_campaigns": 5,
+        "monthly_price": 40,
+        "max_active_campaigns": 3,
         "max_members": 5,
         "ai_gen_lifetime": None,
-        "ai_gen_per_month": 10,
+        "ai_gen_per_month": 15,
         "task_management": True,
         "task_management_full": False,
         "email_marketing": False,
         "giveaway": False,
-        "iframe_embed": False,
+        "iframe_embed": True,
         "media_uploads": True,
         "campaign_updates": True,
         "basic_analytics": True,
@@ -49,11 +49,11 @@ TIER_LIMITS: dict[int, dict[str, Any]] = {
     },
     3: {
         "name": "Scale",
-        "platform_fee_percent": 5.0,
+        "monthly_price": 100,
         "max_active_campaigns": None,
         "max_members": None,
         "ai_gen_lifetime": None,
-        "ai_gen_per_month": 30,
+        "ai_gen_per_month": None,
         "task_management": True,
         "task_management_full": True,
         "email_marketing": True,

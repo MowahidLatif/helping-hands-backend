@@ -41,7 +41,7 @@ The React frontend has been successfully connected to all backend APIs. This doc
 - **Campaign Progress** (`GET /api/campaigns/{id}/progress`)
   - Frontend: Dashboard campaign details panel
   - Shows goal, raised, percent, donations count
-  - Includes platform fee info if goal reached
+  - Includes Stripe processing fee breakdown and `net_to_org_cents` (platform fee is always 0 under v3 policy)
 
 ### ✅ Page Layout Builder
 - **Get Layout** (`GET /api/campaigns/{id}/page-layout`)
@@ -96,7 +96,7 @@ GET /api/campaigns/{id}
   Returns: { id, title, slug, goal, status, ... }
 
 GET /api/campaigns/{id}/progress
-  Returns: { goal, total_raised, percent, donations_count, platform_fee_cents?, ... }
+  Returns: { goal, total_raised, percent, donations_count, fee_option, net_to_org_cents, platform_fee_cents (0 for v3), ... }
 ```
 
 ### Page Layout Endpoints

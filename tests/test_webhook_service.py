@@ -17,8 +17,8 @@ def _patch_common(monkeypatch):
         lambda *_args, **_kwargs: {"total_raised": 12.34},
     )
     monkeypatch.setattr(
-        "app.services.webhook_service.record_platform_fee_if_goal_reached",
-        lambda *_args, **_kwargs: None,
+        "app.services.webhook_service.complete_campaign_if_goal_reached",
+        lambda *_args, **_kwargs: False,
     )
     monkeypatch.setattr(
         "app.services.webhook_service.r",

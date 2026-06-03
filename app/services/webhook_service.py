@@ -14,7 +14,6 @@ from app.models.campaign import (
     get_campaign,
     recompute_total_raised,
     complete_campaign_if_goal_reached,
-    record_platform_fee_if_goal_reached,
 )
 from app.utils.cache import r
 from app.utils.public_campaign_cache import invalidate_public_campaign_cache
@@ -192,11 +191,8 @@ def _apply_status_update(
                 stripe_fee_cents = estimate_stripe_processing_fee_cents(
                     charge_amount_cents
                 )
-            # Use the tier locked at campaign creation — never the org's current tier.
-            _locked_tier = int(campaign.get("locked_tier") or 1)
             accounting = build_donation_accounting(
                 fee_option=fee_option,
-                org_tier=_locked_tier,
                 amount_cents=int((d or {}).get("amount_cents") or 0),
                 stripe_processing_fee_cents=int(stripe_fee_cents),
             )
@@ -226,10 +222,6 @@ def _apply_status_update(
     invalidate_public_campaign_cache(str(cid))
 
     if new_status == "succeeded":
-        try:
-            record_platform_fee_if_goal_reached(cid)
-        except Exception as fee_err:
-            print("[platform fee error]", str(fee_err))
         try:
             completed_now = complete_campaign_if_goal_reached(cid)
             if completed_now:

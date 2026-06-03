@@ -285,41 +285,6 @@ def list_campaigns(
         return [_augment_campaign_row(dict(zip(cols, r))) for r in rows]
 
 
-def record_platform_fee_if_goal_reached(campaign_id: str) -> bool:
-    """
-    If campaign has reached its goal and no fee has been recorded yet,
-    calculate and record the platform fee. Returns True if fee was recorded.
-    """
-    from app.services.fee_policy_service import get_platform_fee_percent
-
-    sql = """SELECT c.goal, c.total_raised, c.platform_fee_recorded_at, c.locked_tier
-             FROM campaigns c WHERE c.id = %s"""
-    with get_db_connection() as conn, conn.cursor() as cur:
-        cur.execute(sql, (campaign_id,))
-        row = cur.fetchone()
-        if not row:
-            return False
-        goal, total_raised, fee_recorded_at, locked_tier = (
-            float(row[0]),
-            float(row[1]),
-            row[2],
-            int(row[3]) if row[3] is not None else 1,
-        )
-        if fee_recorded_at is not None or goal <= 0 or total_raised < goal:
-            return False
-        pct = get_platform_fee_percent(locked_tier)
-        fee_cents = int(round(total_raised * (pct / 100.0) * 100))
-        cur.execute(
-            """UPDATE campaigns
-               SET platform_fee_cents = %s, platform_fee_percent = %s,
-                   platform_fee_recorded_at = now(), updated_at = now()
-               WHERE id = %s""",
-            (fee_cents, pct, campaign_id),
-        )
-        conn.commit()
-        return cur.rowcount > 0
-
-
 def update_campaign(
     campaign_id: str,
     *,

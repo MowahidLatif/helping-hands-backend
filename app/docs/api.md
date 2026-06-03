@@ -43,14 +43,29 @@ Public campaign JSON includes page_layout. Donor page: {subdomain}.domain/donate
 - POST /donations/checkout   # create PaymentIntent, return clientSecret
 - GET  /donations/{id}
 
-## Platform Fees
-When a campaign reaches its goal, a platform fee is charged to the organization (campaign host):
-- 0 - 50,000: 5%
-- 50,000 - 500,000: 4%
-- 500,000 - 1,000,000: 3%
-- 1,000,000+: 2.5%
+## Processing fees (per campaign, not HHF revenue)
 
-Fee is recorded once (first time goal is reached). Exposed in `GET /campaigns/{id}`, `GET /campaigns/{id}/progress` via `platform_fee_cents`, `platform_fee_percent`, `net_to_org_cents`.
+Each campaign chooses who covers **Stripe processing fees** (2.9% + $0.30):
+
+- `donor_pays` (default): donor is grossed up at checkout so the org receives the full intended donation amount.
+- `platform_absorbs`: Stripe fee is deducted from the donation before payout (micro-donations under $10 still pass Stripe fee to the donor).
+
+HelpingHandsFund does **not** take a percentage of donations. HHF revenue is monthly subscription billing ($10 / $40 / $100 tiers), separate from donation flow.
+
+Set `fee_option` on campaign create (draft) or patch before publish. Locked after campaign is active.
+
+Checkout and donation records expose `fee_preview` / accounting fields. `platform_fee_cents` is always `0` under fee policy v3. Historical v2 donations may have non-zero values.
+
+## Org tiers (subscription features)
+
+- Tier 1 Starter — $10/mo: 1 active campaign, 1 admin, 3 AI gens/month
+- Tier 2 Grow — $40/mo: 3 active campaigns, 5 members, 15 AI gens/month, iframe embed, tasks, analytics
+- Tier 3 Scale — $100/mo: unlimited campaigns/members/AI, full feature set
+
+- GET /orgs/{orgId}/tier-info
+- PATCH /orgs/{orgId}/tier
+
+Tiers gate features only; they do not affect donation payout math.
 
 ## Webhooks
 - POST /webhooks/stripe
