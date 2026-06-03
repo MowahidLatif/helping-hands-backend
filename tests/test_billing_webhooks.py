@@ -1,7 +1,6 @@
 """Tests for billing-related Stripe webhook handling."""
 
 import json
-from unittest.mock import patch
 
 from app.services.webhook_service import process_stripe_event
 

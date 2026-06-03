@@ -354,6 +354,14 @@ def process_stripe_event(
             print("[billing checkout error]", str(e))
         return 200, {"ok": True}
 
+    if ev_type == "customer.subscription.trial_will_end":
+        try:
+            from app.services.billing_service import handle_subscription_trial_will_end
+            handle_subscription_trial_will_end(obj or {})
+        except Exception as e:
+            print("[billing trial_will_end error]", str(e))
+        return 200, {"ok": True}
+
     if ev_type in {
         "customer.subscription.created",
         "customer.subscription.updated",

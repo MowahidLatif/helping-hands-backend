@@ -68,7 +68,8 @@ Recommended verification after deploy:
 
 Monthly plans are billed via Stripe Checkout and managed in Settings:
 
-- `STRIPE_PRICE_STARTER`, `STRIPE_PRICE_GROW`, `STRIPE_PRICE_SCALE` — price IDs from Stripe Dashboard
+- `STRIPE_PRICE_*_MONTHLY` / `STRIPE_PRICE_*_ANNUAL` — six price IDs from Stripe Dashboard (or legacy `STRIPE_PRICE_STARTER` etc. as monthly fallback)
+- `STRIPE_TRIAL_DAYS=7` — free trial length for new signups
 - `STRIPE_BILLING_SUCCESS_URL`, `STRIPE_BILLING_CANCEL_URL`, `STRIPE_BILLING_PORTAL_RETURN_URL`
 - Webhook events: `checkout.session.completed`, `customer.subscription.*`, `invoice.paid`, `invoice.payment_failed`
 

@@ -70,15 +70,15 @@ Tiers gate features only; they do not affect donation payout math.
 ## Stripe Billing (org subscriptions)
 
 - POST /orgs/{orgId}/billing/setup — create platform Customer + Connect Express account
-- POST /orgs/{orgId}/billing/checkout — body `{ tier: 1|2|3 }`, returns `{ url }` for Stripe Checkout
+- POST /orgs/{orgId}/billing/checkout — body `{ tier: 1|2|3, interval: "monthly"|"annual" }`, returns `{ url }` for Stripe Checkout (7-day trial when eligible)
 - POST /orgs/{orgId}/billing/change-tier — upgrade/downgrade existing subscription (body `{ tier, acknowledged? }`; or checkout if none)
 - POST /orgs/{orgId}/billing/cancel — cancel subscription immediately (tier resets to Starter)
 - POST /orgs/{orgId}/billing/portal — returns Customer Portal `{ url }` (payment methods, invoices)
 - GET /orgs/{orgId}/billing/status — subscription + Connect payout status (`can_cancel`, `can_change_tier`, cancel scheduling fields)
 
-Webhook events (same POST /webhooks/stripe endpoint): `checkout.session.completed`, `customer.subscription.*`, `invoice.paid`, `invoice.payment_failed`, `account.updated`.
+Webhook events (same POST /webhooks/stripe endpoint): `checkout.session.completed`, `customer.subscription.*`, `customer.subscription.trial_will_end`, `invoice.paid`, `invoice.payment_failed`, `account.updated`.
 
-Configure `STRIPE_PRICE_STARTER`, `STRIPE_PRICE_GROW`, `STRIPE_PRICE_SCALE` and billing redirect URLs in env.
+Configure monthly/annual price IDs (`STRIPE_PRICE_*_MONTHLY`, `STRIPE_PRICE_*_ANNUAL`), `STRIPE_TRIAL_DAYS`, and billing redirect URLs in env. Run RQ scheduler jobs `run_billing_trial_reminders` and `run_billing_grace_expiry` daily.
 
 ## Webhooks
 - POST /webhooks/stripe

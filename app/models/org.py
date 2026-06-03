@@ -9,7 +9,8 @@ _ORG_SELECT_COLS = """
   payout_onboarding_status, payouts_enabled, created_at, updated_at, tier,
   stripe_customer_id, stripe_subscription_id, subscription_status,
   subscription_current_period_end, pending_tier,
-  subscription_cancel_at_period_end, subscription_cancel_at
+  subscription_cancel_at_period_end, subscription_cancel_at,
+  billing_interval, trial_ends_at, payment_grace_ends_at
 """
 
 
@@ -32,6 +33,9 @@ def _row_to_org(row: tuple) -> dict[str, Any]:
         "pending_tier": int(row[14]) if row[14] is not None else None,
         "subscription_cancel_at_period_end": bool(row[15]) if row[15] is not None else False,
         "subscription_cancel_at": row[16],
+        "billing_interval": row[17],
+        "trial_ends_at": row[18],
+        "payment_grace_ends_at": row[19],
     }
 
 
@@ -113,6 +117,7 @@ def update_org_billing(
     stripe_customer_id: str | None = None,
     stripe_connect_account_id: str | None = None,
     pending_tier: int | None = None,
+    billing_interval: str | None = None,
 ) -> dict[str, Any] | None:
     sets: list[str] = []
     params: list[Any] = []
@@ -125,6 +130,10 @@ def update_org_billing(
     if pending_tier is not None:
         sets.append("pending_tier = %s")
         params.append(int(pending_tier) if pending_tier in (1, 2, 3) else None)
+    if billing_interval is not None:
+        sets.append("billing_interval = %s")
+        iv = (billing_interval or "").strip().lower()
+        params.append(iv if iv in ("monthly", "annual") else None)
     if not sets:
         return get_organization(org_id)
     sets.append("updated_at = now()")
@@ -147,6 +156,9 @@ def update_org_subscription(
     pending_tier: int | None = ...,  # type: ignore[assignment]
     subscription_cancel_at_period_end: bool | None = None,
     subscription_cancel_at: datetime | None = ...,  # type: ignore[assignment]
+    billing_interval: str | None = None,
+    trial_ends_at: datetime | None = ...,  # type: ignore[assignment]
+    payment_grace_ends_at: datetime | None = ...,  # type: ignore[assignment]
 ) -> dict[str, Any] | None:
     sets: list[str] = []
     params: list[Any] = []
@@ -171,6 +183,16 @@ def update_org_subscription(
     if subscription_cancel_at is not ...:
         sets.append("subscription_cancel_at = %s")
         params.append(subscription_cancel_at)
+    if billing_interval is not None:
+        sets.append("billing_interval = %s")
+        iv = (billing_interval or "").strip().lower()
+        params.append(iv if iv in ("monthly", "annual") else None)
+    if trial_ends_at is not ...:
+        sets.append("trial_ends_at = %s")
+        params.append(trial_ends_at)
+    if payment_grace_ends_at is not ...:
+        sets.append("payment_grace_ends_at = %s")
+        params.append(payment_grace_ends_at)
     if not sets:
         return get_organization(org_id)
     sets.append("updated_at = now()")

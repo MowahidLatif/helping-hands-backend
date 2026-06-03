@@ -162,3 +162,15 @@ def send_campaign_update_notifications(campaign_id: str, update_id: str) -> None
             )
         except Exception as e:
             logger.error("send campaign update email to %s: %s", to_addr, e)
+
+
+def run_billing_trial_reminders() -> int:
+    """RQ/cron: send Day-6 trial-ending-tomorrow emails."""
+    from app.services.billing_service import process_trial_day6_reminders
+    return process_trial_day6_reminders()
+
+
+def run_billing_grace_expiry() -> int:
+    """RQ/cron: restrict accounts after payment grace period."""
+    from app.services.billing_service import process_payment_grace_expiry
+    return process_payment_grace_expiry()

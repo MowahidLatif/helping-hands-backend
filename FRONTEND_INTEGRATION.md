@@ -101,7 +101,7 @@ GET /api/campaigns/{id}/progress
 
 ### Org billing (Stripe subscriptions)
 - POST /api/orgs/{id}/billing/setup
-- POST /api/orgs/{id}/billing/checkout  Body: { tier: 1|2|3 } → { url }
+- POST /api/orgs/{id}/billing/checkout  Body: { tier: 1|2|3, interval: "monthly"|"annual" } → { url, trial_eligible, trial_days }
 - POST /api/orgs/{id}/billing/change-tier  Body: { tier: 1|2|3, acknowledged?: boolean }
 - POST /api/orgs/{id}/billing/cancel — immediate cancellation
 - POST /api/orgs/{id}/billing/portal → { url } (payment methods / invoices)
@@ -109,7 +109,7 @@ GET /api/campaigns/{id}/progress
 
 Settings: owners can upgrade/downgrade plans, cancel subscription in-app, or manage payment methods via Portal. Account deletion cancels the org subscription when the user is the sole owner.
 
-Sign-up flow: register → billing/setup → billing/checkout → Stripe → /settings/billing/success
+Sign-up flow: register → billing/setup → billing/checkout (7-day trial) → Stripe Hosted Checkout → /settings/billing/success. Direct URL: `/signup?tier=2&interval=annual`. Pricing page keeps waitlist as primary CTA; optional "Start free trial" links to signup.
 
 ### Page Layout Endpoints
 ```

@@ -34,7 +34,6 @@ from app.models.task_status import (
 from app.models.org_email_settings import get_email_settings, upsert_email_settings
 from app.services.auth_service import _hash_password
 import re
-import os
 
 from app.utils.db import get_db_connection
 from app.utils.slug import slugify_with_fallback
@@ -493,11 +492,14 @@ def billing_checkout(org_id):
         tier = 0
     if tier not in (1, 2, 3):
         return jsonify({"error": "tier must be 1, 2, or 3"}), 400
+    interval = (body.get("interval") or "monthly").strip().lower()
+    if interval not in ("monthly", "annual"):
+        return jsonify({"error": "interval must be monthly or annual"}), 400
     user_id = get_jwt_identity()
     user = get_user_by_id(user_id)
     if not user:
         return jsonify({"error": "user not found"}), 404
-    result = create_subscription_checkout(org_id, tier, user["email"])
+    result = create_subscription_checkout(org_id, tier, user["email"], interval=interval)
     if result.get("error"):
         return jsonify(result), 400
     return jsonify(result), 200

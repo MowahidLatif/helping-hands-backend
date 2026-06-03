@@ -15,10 +15,10 @@ from app.services.billing_service import (
 
 
 def test_tier_price_mapping():
-    with patch.object(billing_mod, "STRIPE_PRICE_STARTER", "price_starter"), patch.object(
-        billing_mod, "STRIPE_PRICE_GROW", "price_grow"
-    ), patch.object(billing_mod, "STRIPE_PRICE_SCALE", "price_scale"):
-        assert tier_to_price_id(1) == "price_starter"
+    with patch.object(billing_mod, "STRIPE_PRICE_STARTER_MONTHLY", "price_starter"), patch.object(
+        billing_mod, "STRIPE_PRICE_GROW_MONTHLY", "price_grow"
+    ), patch.object(billing_mod, "STRIPE_PRICE_SCALE_MONTHLY", "price_scale"):
+        assert tier_to_price_id(1, "monthly") == "price_starter"
         assert price_id_to_tier("price_grow") == 2
 
 
