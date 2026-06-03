@@ -8,7 +8,8 @@ _ORG_SELECT_COLS = """
   id, name, subdomain, stripe_connect_account_id, payout_account_ready,
   payout_onboarding_status, payouts_enabled, created_at, updated_at, tier,
   stripe_customer_id, stripe_subscription_id, subscription_status,
-  subscription_current_period_end, pending_tier
+  subscription_current_period_end, pending_tier,
+  subscription_cancel_at_period_end, subscription_cancel_at
 """
 
 
@@ -29,6 +30,8 @@ def _row_to_org(row: tuple) -> dict[str, Any]:
         "subscription_status": row[12] or "legacy",
         "subscription_current_period_end": row[13],
         "pending_tier": int(row[14]) if row[14] is not None else None,
+        "subscription_cancel_at_period_end": bool(row[15]) if row[15] is not None else False,
+        "subscription_cancel_at": row[16],
     }
 
 
@@ -142,6 +145,8 @@ def update_org_subscription(
     subscription_current_period_end: datetime | None = None,
     tier: int | None = None,
     pending_tier: int | None = ...,  # type: ignore[assignment]
+    subscription_cancel_at_period_end: bool | None = None,
+    subscription_cancel_at: datetime | None = ...,  # type: ignore[assignment]
 ) -> dict[str, Any] | None:
     sets: list[str] = []
     params: list[Any] = []
@@ -160,6 +165,12 @@ def update_org_subscription(
     if pending_tier is not ...:
         sets.append("pending_tier = %s")
         params.append(int(pending_tier) if pending_tier in (1, 2, 3) else None)
+    if subscription_cancel_at_period_end is not None:
+        sets.append("subscription_cancel_at_period_end = %s")
+        params.append(bool(subscription_cancel_at_period_end))
+    if subscription_cancel_at is not ...:
+        sets.append("subscription_cancel_at = %s")
+        params.append(subscription_cancel_at)
     if not sets:
         return get_organization(org_id)
     sets.append("updated_at = now()")

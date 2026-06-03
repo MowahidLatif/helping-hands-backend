@@ -417,42 +417,11 @@ def patch_org_tier(org_id):
     if tier not in (1, 2, 3):
         return jsonify({"error": "tier must be 1, 2, or 3"}), 400
 
-    # Check for in-flight campaigns (non-completed, non-archived).
-    # If any exist and the caller hasn't explicitly acknowledged, return the list
-    # so the frontend can show the acknowledgment modal.
     acknowledged = bool(body.get("acknowledged"))
-    if not acknowledged:
-        from app.utils.db import get_db_connection as _get_db
-        from app.utils.tier_features import TIER_LIMITS
-        sql = """
-            SELECT id, title, locked_tier, status
-            FROM campaigns
-            WHERE org_id = %s AND status NOT IN ('completed', 'cancelled', 'archived')
-            ORDER BY created_at DESC
-        """
-        with _get_db() as conn, conn.cursor() as cur:
-            cur.execute(sql, (org_id,))
-            rows = cur.fetchall()
-        if rows:
-            campaigns_info = [
-                {
-                    "id": r[0],
-                    "title": r[1],
-                    "locked_tier": int(r[2]) if r[2] is not None else 1,
-                    "locked_tier_name": TIER_LIMITS.get(int(r[2]) if r[2] else 1, {}).get("name", "Starter"),
-                    "status": r[3],
-                }
-                for r in rows
-            ]
-            return jsonify({
-                "requires_acknowledgment": True,
-                "message": (
-                    "You have active campaigns on your account. "
-                    "Plan features and limits for these campaigns will update immediately. "
-                    "Acknowledge to proceed."
-                ),
-                "campaigns": campaigns_info,
-            }), 409
+    from app.utils.tier_features import check_tier_change_acknowledgment
+    ack_payload = check_tier_change_acknowledgment(org_id, acknowledged)
+    if ack_payload:
+        return jsonify(ack_payload), 409
 
     from app.models.campaign import update_active_campaigns_locked_tier
     result = update_org_tier(org_id, tier)
@@ -547,6 +516,11 @@ def billing_change_tier(org_id):
         tier = 0
     if tier not in (1, 2, 3):
         return jsonify({"error": "tier must be 1, 2, or 3"}), 400
+    acknowledged = bool(body.get("acknowledged"))
+    from app.utils.tier_features import check_tier_change_acknowledgment
+    ack_payload = check_tier_change_acknowledgment(org_id, acknowledged)
+    if ack_payload:
+        return jsonify(ack_payload), 409
     user_id = get_jwt_identity()
     user = get_user_by_id(user_id)
     if not user:
@@ -554,6 +528,18 @@ def billing_change_tier(org_id):
     result = change_subscription_tier(org_id, tier, user["email"])
     if result.get("error"):
         return jsonify(result), 400
+    return jsonify(result), 200
+
+
+@orgs.post("/api/orgs/<org_id>/billing/cancel")
+@require_org_role("owner")
+def billing_cancel(org_id):
+    from app.services.billing_service import cancel_subscription
+
+    result = cancel_subscription(org_id)
+    if result.get("error"):
+        status = 404 if result["error"] == "organization not found" else 400
+        return jsonify(result), status
     return jsonify(result), 200
 
 

@@ -173,7 +173,8 @@ def _unusable_password_hash() -> str:
 
 def delete_account(user_id: str, password: str, totp_code: str | None = None) -> dict:
     """
-    Verify password (and TOTP if enabled), then anonymize user. No hard delete.
+    Verify password (and TOTP if enabled), cancel org subscription if owner,
+    remove org membership, then anonymize user. No hard delete.
     Returns {"success": True} or {"error": "..."}.
     """
     user = get_user_by_id(user_id)
@@ -187,6 +188,42 @@ def delete_account(user_id: str, password: str, totp_code: str | None = None) ->
         secret = get_user_totp_secret(user_id)
         if not secret or not pyotp.TOTP(secret).verify(totp_code, valid_window=1):
             return {"error": "Invalid 2FA code"}
+
+    from app.models.org_user import (
+        count_org_members_excluding,
+        count_org_owners,
+        get_primary_org_role,
+        remove_user_from_org,
+    )
+    from app.services.billing_service import cancel_subscription, org_has_active_billing
+    from app.models.org import get_organization
+
+    org_role = get_primary_org_role(user_id)
+    if org_role:
+        org_id, role = org_role
+        if role == "owner":
+            other_owners = count_org_owners(org_id) - 1
+            other_members = count_org_members_excluding(org_id, user_id)
+            if other_owners <= 0 and other_members > 0:
+                return {
+                    "error": (
+                        "Transfer organization ownership to another member before deleting "
+                        "your account."
+                    ),
+                    "requires_ownership_transfer": True,
+                }
+            org = get_organization(org_id)
+            if org and org_has_active_billing(org) and org.get("stripe_subscription_id"):
+                cancel_result = cancel_subscription(org_id)
+                if cancel_result.get("error"):
+                    return {
+                        "error": (
+                            "Could not cancel your organization's subscription. "
+                            "Try again or cancel your plan in Settings first."
+                        ),
+                    }
+        remove_user_from_org(org_id, user_id)
+
     model_anonymize_user(user_id, _unusable_password_hash())
     return {"success": True}
 

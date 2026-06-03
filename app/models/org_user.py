@@ -39,6 +39,24 @@ def get_user_role_in_org(user_id: str, org_id: str) -> Optional[str]:
         return row[0] if row else None
 
 
+def count_org_owners(org_id: str) -> int:
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT COUNT(*) FROM org_users WHERE org_id = %s AND role = 'owner'",
+            (org_id,),
+        )
+        return int(cur.fetchone()[0])
+
+
+def count_org_members_excluding(org_id: str, user_id: str) -> int:
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT COUNT(*) FROM org_users WHERE org_id = %s AND user_id <> %s",
+            (org_id, user_id),
+        )
+        return int(cur.fetchone()[0])
+
+
 def list_org_members(org_id: str) -> List[Dict[str, Any]]:
     sql = """
       SELECT u.id, u.email, u.name, ou.role

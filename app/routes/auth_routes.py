@@ -117,7 +117,8 @@ def delete_account_route():
     code = (data.get("code") or "").strip() or None
     result = delete_account(get_jwt_identity(), password, totp_code=code)
     if "error" in result:
-        return jsonify({"error": result["error"]}), 400
+        status = 409 if result.get("requires_ownership_transfer") else 400
+        return jsonify(result), status
     return jsonify(result), 200
 
 

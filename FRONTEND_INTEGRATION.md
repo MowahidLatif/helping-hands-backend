@@ -102,9 +102,12 @@ GET /api/campaigns/{id}/progress
 ### Org billing (Stripe subscriptions)
 - POST /api/orgs/{id}/billing/setup
 - POST /api/orgs/{id}/billing/checkout  Body: { tier: 1|2|3 } → { url }
-- POST /api/orgs/{id}/billing/change-tier
-- POST /api/orgs/{id}/billing/portal → { url }
+- POST /api/orgs/{id}/billing/change-tier  Body: { tier: 1|2|3, acknowledged?: boolean }
+- POST /api/orgs/{id}/billing/cancel — immediate cancellation
+- POST /api/orgs/{id}/billing/portal → { url } (payment methods / invoices)
 - GET /api/orgs/{id}/billing/status
+
+Settings: owners can upgrade/downgrade plans, cancel subscription in-app, or manage payment methods via Portal. Account deletion cancels the org subscription when the user is the sole owner.
 
 Sign-up flow: register → billing/setup → billing/checkout → Stripe → /settings/billing/success
 

@@ -110,12 +110,30 @@ def _map_subscription_status(stripe_status: str | None) -> str:
     return "none"
 
 
+def _cancel_at(subscription: dict | Any) -> datetime | None:
+    ts = getattr(subscription, "cancel_at", None)
+    if ts is None and isinstance(subscription, dict):
+        ts = subscription.get("cancel_at")
+    if not ts:
+        return None
+    return datetime.fromtimestamp(int(ts), tz=timezone.utc)
+
+
+def _cancel_at_period_end(subscription: dict | Any) -> bool:
+    val = getattr(subscription, "cancel_at_period_end", None)
+    if val is None and isinstance(subscription, dict):
+        val = subscription.get("cancel_at_period_end")
+    return bool(val)
+
+
 def apply_subscription_state(org_id: str, subscription: dict | Any) -> dict[str, Any] | None:
     sub_id = getattr(subscription, "id", None) or (subscription.get("id") if isinstance(subscription, dict) else None)
     stripe_status = getattr(subscription, "status", None) or (subscription.get("status") if isinstance(subscription, dict) else None)
     mapped = _map_subscription_status(stripe_status)
     tier = _tier_from_subscription(subscription)
     period_end = _period_end(subscription)
+    cancel_at_period_end = _cancel_at_period_end(subscription)
+    cancel_at = _cancel_at(subscription)
 
     org = get_organization(org_id)
     if not org:
@@ -132,6 +150,8 @@ def apply_subscription_state(org_id: str, subscription: dict | Any) -> dict[str,
         subscription_current_period_end=period_end,
         tier=effective_tier if mapped == "active" else 1,
         pending_tier=None if mapped == "active" else org.get("pending_tier"),
+        subscription_cancel_at_period_end=cancel_at_period_end if mapped == "active" else False,
+        subscription_cancel_at=cancel_at if mapped == "active" and cancel_at_period_end else None,
     )
     if updated and mapped == "active" and tier is not None:
         update_active_campaigns_locked_tier(org_id, tier)
@@ -262,6 +282,27 @@ def change_subscription_tier(org_id: str, new_tier: int, owner_email: str) -> di
     return {"subscription_id": updated_sub.id, "tier": result.get("tier") if result else new_tier}
 
 
+def cancel_subscription(org_id: str) -> dict[str, Any]:
+    org = get_organization(org_id)
+    if not org:
+        return {"error": "organization not found"}
+    sub_id = org.get("stripe_subscription_id")
+    status = (org.get("subscription_status") or "").strip().lower()
+    if not sub_id or status not in {"active", "past_due", "trialing"}:
+        return {"error": "no active subscription to cancel"}
+    if not _stripe_configured():
+        return {"error": "Stripe is not configured"}
+
+    stripe.api_key = STRIPE_SECRET_KEY
+    canceled_sub = stripe.Subscription.cancel(str(sub_id))
+    result = apply_subscription_state(org_id, canceled_sub)
+    return {
+        "subscription_id": canceled_sub.id,
+        "subscription_status": result.get("subscription_status") if result else "canceled",
+        "tier": result.get("tier") if result else 1,
+    }
+
+
 def create_billing_portal_session(org_id: str) -> dict[str, Any]:
     org = get_organization(org_id)
     if not org:
@@ -285,6 +326,9 @@ def get_billing_status(org_id: str) -> dict[str, Any]:
     org = get_organization(org_id)
     if not org:
         return {"error": "organization not found"}
+    status = (org.get("subscription_status") or "legacy").strip().lower()
+    can_cancel = status in {"active", "past_due", "trialing"} and bool(org.get("stripe_subscription_id"))
+    can_change_tier = status in {"active", "past_due", "trialing", "none", "canceled", "legacy"}
     return {
         "org_id": org_id,
         "tier": org.get("tier"),
@@ -295,6 +339,12 @@ def get_billing_status(org_id: str) -> dict[str, Any]:
             if org.get("subscription_current_period_end")
             else None
         ),
+        "subscription_cancel_at_period_end": bool(org.get("subscription_cancel_at_period_end")),
+        "subscription_cancel_at": (
+            org["subscription_cancel_at"].isoformat()
+            if org.get("subscription_cancel_at")
+            else None
+        ),
         "stripe_customer_id": org.get("stripe_customer_id"),
         "stripe_subscription_id": org.get("stripe_subscription_id"),
         "stripe_connect_account_id": org.get("stripe_connect_account_id"),
@@ -303,6 +353,8 @@ def get_billing_status(org_id: str) -> dict[str, Any]:
         "payout_onboarding_status": org.get("payout_onboarding_status"),
         "billing_required": billing_required(org),
         "billing_active": org_has_active_billing(org),
+        "can_cancel": can_cancel,
+        "can_change_tier": can_change_tier,
     }
 
 

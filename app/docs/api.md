@@ -71,9 +71,10 @@ Tiers gate features only; they do not affect donation payout math.
 
 - POST /orgs/{orgId}/billing/setup — create platform Customer + Connect Express account
 - POST /orgs/{orgId}/billing/checkout — body `{ tier: 1|2|3 }`, returns `{ url }` for Stripe Checkout
-- POST /orgs/{orgId}/billing/change-tier — upgrade/downgrade existing subscription (or checkout if none)
-- POST /orgs/{orgId}/billing/portal — returns Customer Portal `{ url }`
-- GET /orgs/{orgId}/billing/status — subscription + Connect payout status
+- POST /orgs/{orgId}/billing/change-tier — upgrade/downgrade existing subscription (body `{ tier, acknowledged? }`; or checkout if none)
+- POST /orgs/{orgId}/billing/cancel — cancel subscription immediately (tier resets to Starter)
+- POST /orgs/{orgId}/billing/portal — returns Customer Portal `{ url }` (payment methods, invoices)
+- GET /orgs/{orgId}/billing/status — subscription + Connect payout status (`can_cancel`, `can_change_tier`, cancel scheduling fields)
 
 Webhook events (same POST /webhooks/stripe endpoint): `checkout.session.completed`, `customer.subscription.*`, `invoice.paid`, `invoice.payment_failed`, `account.updated`.
 

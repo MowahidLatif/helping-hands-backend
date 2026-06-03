@@ -64,6 +64,18 @@ Recommended verification after deploy:
 3. Confirm one test email is sent successfully (receipt or password reset).
 4. Confirm Stripe webhook signatures are being verified (do not enable `DEV_STRIPE_NO_VERIFY`).
 
+## Stripe Billing (org subscriptions)
+
+Monthly plans are billed via Stripe Checkout and managed in Settings:
+
+- `STRIPE_PRICE_STARTER`, `STRIPE_PRICE_GROW`, `STRIPE_PRICE_SCALE` — price IDs from Stripe Dashboard
+- `STRIPE_BILLING_SUCCESS_URL`, `STRIPE_BILLING_CANCEL_URL`, `STRIPE_BILLING_PORTAL_RETURN_URL`
+- Webhook events: `checkout.session.completed`, `customer.subscription.*`, `invoice.paid`, `invoice.payment_failed`
+
+Owners upgrade/downgrade via `POST /api/orgs/{id}/billing/change-tier`, cancel immediately via `POST /api/orgs/{id}/billing/cancel`, and manage payment methods via Customer Portal (`POST /api/orgs/{id}/billing/portal`). Enable subscription cancellation and plan changes in the Stripe Customer Portal settings as a fallback.
+
+Run migrations after pulling: `poetry run alembic upgrade head` (includes `0030_subscription_cancel_fields`).
+
 ## Testing
 
 ### 1. Seed test data

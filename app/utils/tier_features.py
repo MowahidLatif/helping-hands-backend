@@ -174,6 +174,47 @@ def check_campaign_creation_allowed(org_id: str) -> str | None:
     return None
 
 
+def list_in_flight_campaigns(org_id: str) -> list[dict[str, Any]]:
+    """Campaigns that are not completed, cancelled, or archived."""
+    sql = """
+        SELECT id, title, locked_tier, status
+        FROM campaigns
+        WHERE org_id = %s AND status NOT IN ('completed', 'cancelled', 'archived')
+        ORDER BY created_at DESC
+    """
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (org_id,))
+        rows = cur.fetchall()
+    return [
+        {
+            "id": r[0],
+            "title": r[1],
+            "locked_tier": int(r[2]) if r[2] is not None else 1,
+            "locked_tier_name": TIER_LIMITS.get(int(r[2]) if r[2] else 1, {}).get("name", "Starter"),
+            "status": r[3],
+        }
+        for r in rows
+    ]
+
+
+def check_tier_change_acknowledgment(org_id: str, acknowledged: bool) -> dict[str, Any] | None:
+    """Return 409 payload when active campaigns exist and caller has not acknowledged."""
+    if acknowledged:
+        return None
+    campaigns = list_in_flight_campaigns(org_id)
+    if not campaigns:
+        return None
+    return {
+        "requires_acknowledgment": True,
+        "message": (
+            "You have active campaigns on your account. "
+            "Plan features and limits for these campaigns will update immediately. "
+            "Acknowledge to proceed."
+        ),
+        "campaigns": campaigns,
+    }
+
+
 def check_member_add_allowed(org_id: str) -> str | None:
     """Return an error message string if adding a member is not allowed, else None."""
     tier = get_org_tier(org_id)

@@ -6,6 +6,8 @@ import app.services.billing_service as billing_mod
 from app.services.billing_service import (
     apply_subscription_state,
     billing_required,
+    cancel_subscription,
+    get_billing_status,
     org_has_active_billing,
     price_id_to_tier,
     tier_to_price_id,
@@ -67,3 +69,41 @@ def test_apply_subscription_state_canceled_downgrades(mock_get_org, mock_update_
     call_kwargs = mock_update_sub.call_args.kwargs
     assert call_kwargs["tier"] == 1
     assert call_kwargs["subscription_status"] == "canceled"
+
+
+@patch("app.services.billing_service.apply_subscription_state")
+@patch("app.services.billing_service.stripe.Subscription.cancel")
+@patch("app.services.billing_service.get_organization")
+def test_cancel_subscription_immediate(mock_get_org, mock_stripe_cancel, mock_apply):
+    mock_get_org.return_value = {
+        "id": "org1",
+        "stripe_subscription_id": "sub_123",
+        "subscription_status": "active",
+    }
+    canceled = MagicMock()
+    canceled.id = "sub_123"
+    mock_stripe_cancel.return_value = canceled
+    mock_apply.return_value = {"id": "org1", "tier": 1, "subscription_status": "canceled"}
+
+    with patch.object(billing_mod, "STRIPE_SECRET_KEY", "sk_test"):
+        result = cancel_subscription("org1")
+
+    mock_stripe_cancel.assert_called_once_with("sub_123")
+    mock_apply.assert_called_once_with("org1", canceled)
+    assert result["subscription_status"] == "canceled"
+    assert result["tier"] == 1
+
+
+@patch("app.services.billing_service.get_organization")
+def test_get_billing_status_can_cancel(mock_get_org):
+    mock_get_org.return_value = {
+        "id": "org1",
+        "tier": 2,
+        "subscription_status": "active",
+        "stripe_subscription_id": "sub_123",
+        "subscription_cancel_at_period_end": False,
+        "subscription_cancel_at": None,
+    }
+    result = get_billing_status("org1")
+    assert result["can_cancel"] is True
+    assert result["can_change_tier"] is True
