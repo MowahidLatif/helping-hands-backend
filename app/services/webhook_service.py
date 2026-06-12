@@ -9,6 +9,7 @@ from app.models.donation import (
     set_status_by_id,
     get_donation,
     update_donation_accounting,
+    update_donor_names,
 )
 from app.models.campaign import (
     get_campaign,
@@ -210,22 +211,37 @@ def _apply_status_update(
                 net_to_org_cents=accounting.net_to_org_cents,
             )
 
+    if new_status == "succeeded" and d:
+        meta = (event_obj or {}).get("metadata") or {}
+        first = (meta.get("donor_first_name") or "").strip() or None
+        last = (meta.get("donor_last_name") or "").strip() or None
+        if first or last:
+            try:
+                update_donor_names(str(d["id"]), first, last)
+                d = get_donation(str(d["id"]))
+            except Exception as name_err:
+                print(f"[donor name update error] {name_err}", flush=True)
+
     if new_status == "succeeded" and d and d.get("donor_email") and d.get("campaign_id"):
         try:
-            from app.models.raffle import get_raffle_by_campaign, upsert_raffle_entry
+            from app.models.raffle import get_raffle_by_campaign, upsert_raffle_entry, get_org_member_emails
             raffle = get_raffle_by_campaign(d["campaign_id"])
             if raffle and raffle["status"] == "active":
-                metadata = (event_obj or {}).get("metadata") or {}
-                display_consent = metadata.get("raffle_display_consent", "0") == "1"
-                upsert_raffle_entry(
-                    raffle_id=raffle["id"],
-                    donor_email=d["donor_email"],
-                    donor_first_name=d.get("donor_first_name"),
-                    donor_last_name=d.get("donor_last_name"),
-                    display_consent=display_consent,
-                    source="donation",
-                    donation_id=str(d["id"]),
-                )
+                camp_for_raffle = get_campaign(d["campaign_id"])
+                member_emails = get_org_member_emails(camp_for_raffle["org_id"]) if camp_for_raffle else set()
+                donor_email_lower = (d["donor_email"] or "").lower()
+                if donor_email_lower not in member_emails:
+                    metadata = (event_obj or {}).get("metadata") or {}
+                    display_consent = metadata.get("raffle_display_consent", "0") == "1"
+                    upsert_raffle_entry(
+                        raffle_id=raffle["id"],
+                        donor_email=d["donor_email"],
+                        donor_first_name=d.get("donor_first_name"),
+                        donor_last_name=d.get("donor_last_name"),
+                        display_consent=display_consent,
+                        source="donation",
+                        donation_id=str(d["id"]),
+                    )
         except Exception as raffle_err:
             print(f"[raffle entry upsert error] {raffle_err}", flush=True)
 
@@ -324,6 +340,13 @@ def process_stripe_event(
             new_status="refunded",
             event_obj=obj,
         )
+        try:
+            donation = _find_donation(pi_id, donation_id)
+            if donation:
+                from app.services.raffle_service import handle_donation_voided
+                handle_donation_voided(str(donation["id"]), "refund")
+        except Exception as void_err:
+            print(f"[raffle void error] {void_err}", flush=True)
         return 200, {"ok": True}
 
     if ev_type in {
@@ -348,6 +371,14 @@ def process_stripe_event(
             new_status=new_status,
             event_obj=obj,
         )
+        if new_status == "refunded":
+            try:
+                donation = _find_donation(pi_id, donation_id)
+                if donation:
+                    from app.services.raffle_service import handle_donation_voided
+                    handle_donation_voided(str(donation["id"]), "chargeback")
+            except Exception as void_err:
+                print(f"[raffle void error] {void_err}", flush=True)
         return 200, {"ok": True}
 
     if ev_type in {

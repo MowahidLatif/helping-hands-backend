@@ -27,6 +27,8 @@ def start_checkout(
     donor_email: str | None = None,
     message: str | None = None,
     raffle_display_consent: bool = False,
+    donor_first_name: str | None = None,
+    donor_last_name: str | None = None,
 ) -> Dict[str, Any]:
     camp = get_campaign(campaign_id)
     if not camp:
@@ -56,6 +58,8 @@ def start_checkout(
         currency=CURRENCY,
         donor_email=(donor_email or None),
         message=(message or None),
+        donor_first_name=(donor_first_name or None),
+        donor_last_name=(donor_last_name or None),
     )
     stripe_fee_estimate = estimate_stripe_processing_fee_cents(charge_amount_cents)
     checkout_accounting = build_donation_accounting(
@@ -98,6 +102,8 @@ def start_checkout(
             "charge_amount_cents": str(charge_amount_cents),
             "donor_cover_amount_cents": str(donor_cover_amount_cents),
             "raffle_display_consent": "1" if raffle_display_consent else "0",
+            "donor_first_name": (donor_first_name or "")[:100],
+            "donor_last_name": (donor_last_name or "")[:100],
         },
         "idempotency_key": donation["id"],
         "automatic_payment_methods": {"enabled": True},

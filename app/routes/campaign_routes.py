@@ -196,6 +196,13 @@ def patch(campaign_id):
         updates["title"] = (body["title"] or "").strip()
     if "goal" in body:
         updates["goal"] = float(body["goal"])
+    if "ends_at" in body:
+        # Block end-date changes when a raffle exists
+        from app.models.raffle import get_raffle_by_campaign
+        if get_raffle_by_campaign(campaign_id):
+            return jsonify({"error": "End dates are locked for campaigns with a raffle."}), 422
+        val = body.get("ends_at")
+        updates["ends_at"] = val  # pass through; update_campaign must handle it
     if "status" in body:
         status = (body.get("status") or "").strip().lower()
         if status not in VALID_CAMPAIGN_STATUSES:
@@ -265,13 +272,25 @@ def patch(campaign_id):
             camp.get("fee_policy_version") or FEE_POLICY_VERSION
         )
 
+    old_status = (camp.get("status") or "").strip().lower()
+    new_status_val = (updates.get("status") or "").strip().lower()
+
     try:
         newrow = update_campaign(campaign_id, **updates)
         if newrow is None:
             return jsonify({"error": "not found"}), 404
-        return jsonify(newrow), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 400
+
+    # B1: trigger immediate raffle draw when campaign is manually completed
+    if new_status_val == "completed" and old_status != "completed":
+        try:
+            from app.services.raffle_service import trigger_raffle_draw_if_active
+            trigger_raffle_draw_if_active(campaign_id)
+        except Exception as draw_err:
+            print(f"[raffle] trigger on campaign complete error: {draw_err}", flush=True)
+
+    return jsonify(newrow), 200
 
 
 @campaigns.delete("/<campaign_id>")

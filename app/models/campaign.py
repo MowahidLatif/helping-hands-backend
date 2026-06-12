@@ -167,7 +167,7 @@ def get_campaign(campaign_id: str) -> dict[str, Any] | None:
              fee_option, fee_policy_version,
              platform_fee_cents, platform_fee_percent, platform_fee_recorded_at,
              giveaway_prize_cents, page_layout, ai_site_recipe, locked_tier,
-             created_at, updated_at
+             ends_at, created_at, updated_at
              FROM campaigns WHERE id = %s"""
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, (campaign_id,))
@@ -192,6 +192,7 @@ def get_campaign(campaign_id: str) -> dict[str, Any] | None:
             "page_layout",
             "ai_site_recipe",
             "locked_tier",
+            "ends_at",
             "created_at",
             "updated_at",
         ]
@@ -296,6 +297,7 @@ def update_campaign(
     giveaway_prize_cents: int | None = None,
     fee_option: str | None = None,
     fee_policy_version: str | None = None,
+    ends_at=None,
 ) -> dict[str, Any] | None:
     sets, params = [], []
     if title is not None:
@@ -325,10 +327,13 @@ def update_campaign(
     if fee_policy_version is not None:
         sets.append("fee_policy_version = %s")
         params.append(fee_policy_version)
+    if ends_at is not None:
+        sets.append("ends_at = %s")
+        params.append(ends_at)
     if not sets:
         return get_campaign(campaign_id)
     sets.append("updated_at = now()")
-    sql = f"UPDATE campaigns SET {', '.join(sets)} WHERE id = %s RETURNING id, org_id, title, slug, goal, status, custom_domain, total_raised, fee_option, fee_policy_version, platform_fee_cents, platform_fee_percent, platform_fee_recorded_at, giveaway_prize_cents, page_layout, ai_site_recipe, locked_tier, created_at, updated_at"
+    sql = f"UPDATE campaigns SET {', '.join(sets)} WHERE id = %s RETURNING id, org_id, title, slug, goal, status, custom_domain, total_raised, fee_option, fee_policy_version, platform_fee_cents, platform_fee_percent, platform_fee_recorded_at, giveaway_prize_cents, page_layout, ai_site_recipe, locked_tier, ends_at, created_at, updated_at"
     params.append(campaign_id)
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, tuple(params))

@@ -11,20 +11,26 @@ def create_donation(
     currency: str,
     donor_email: str | None,
     message: str | None = None,
+    donor_first_name: str | None = None,
+    donor_last_name: str | None = None,
 ) -> dict[str, Any]:
     sql = """
-    INSERT INTO donations (org_id, campaign_id, amount_cents, currency, donor_email, message, status)
-    VALUES (%s, %s, %s, %s, %s, %s, 'initiated')
-    RETURNING id, org_id, campaign_id, amount_cents, currency, donor_email, message, status,
+    INSERT INTO donations (org_id, campaign_id, amount_cents, currency, donor_email, message,
+                           donor_first_name, donor_last_name, status)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'initiated')
+    RETURNING id, org_id, campaign_id, amount_cents, currency, donor_email, message,
+              donor_first_name, donor_last_name, status,
               fee_option, fee_policy_version, stripe_processing_fee_cents, platform_fee_percent,
               platform_fee_cents, donor_fee_cents, platform_absorbed_fee_cents, net_to_org_cents,
               created_at, updated_at
     """
     with get_db_connection() as conn, conn.cursor() as cur:
         msg_val = (message or "").strip()[:2000] or None
+        first = (donor_first_name or "").strip()[:100] or None
+        last = (donor_last_name or "").strip()[:100] or None
         cur.execute(
             sql,
-            (org_id, campaign_id, amount_cents, currency, donor_email, msg_val),
+            (org_id, campaign_id, amount_cents, currency, donor_email, msg_val, first, last),
         )
         row = cur.fetchone()
         conn.commit()
@@ -36,6 +42,8 @@ def create_donation(
             "currency",
             "donor_email",
             "message",
+            "donor_first_name",
+            "donor_last_name",
             "status",
             "fee_option",
             "fee_policy_version",
@@ -62,10 +70,10 @@ def set_payment_intent(donation_id: str, pi_id: str) -> None:
 
 def get_donation(donation_id: str) -> dict[str, Any] | None:
     sql = """SELECT id, org_id, campaign_id, amount_cents, currency, donor_email,
-             message, status, stripe_payment_intent_id, fee_option, fee_policy_version,
-             stripe_balance_transaction_id, stripe_processing_fee_cents,
-             platform_fee_percent, platform_fee_cents, donor_fee_cents,
-             platform_absorbed_fee_cents, net_to_org_cents, created_at, updated_at
+             message, donor_first_name, donor_last_name, status, stripe_payment_intent_id,
+             fee_option, fee_policy_version, stripe_balance_transaction_id,
+             stripe_processing_fee_cents, platform_fee_percent, platform_fee_cents,
+             donor_fee_cents, platform_absorbed_fee_cents, net_to_org_cents, created_at, updated_at
              FROM donations WHERE id = %s"""
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, (donation_id,))
@@ -80,6 +88,8 @@ def get_donation(donation_id: str) -> dict[str, Any] | None:
             "currency",
             "donor_email",
             "message",
+            "donor_first_name",
+            "donor_last_name",
             "status",
             "stripe_payment_intent_id",
             "fee_option",
@@ -318,6 +328,21 @@ def summarize_succeeded_donations(campaign_id: str) -> dict[str, int]:
             "platform_absorbed_fee_cents": int(row[4] or 0),
             "net_payout_cents": int(row[5] or 0),
         }
+
+
+def update_donor_names(donation_id: str, first_name: str | None, last_name: str | None) -> None:
+    if not first_name and not last_name:
+        return
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """UPDATE donations
+               SET donor_first_name = COALESCE(%s, donor_first_name),
+                   donor_last_name  = COALESCE(%s, donor_last_name),
+                   updated_at = now()
+               WHERE id = %s""",
+            (first_name or None, last_name or None, donation_id),
+        )
+        conn.commit()
 
 
 def attach_pi_to_donation(donation_id: str, pi_id: str) -> None:

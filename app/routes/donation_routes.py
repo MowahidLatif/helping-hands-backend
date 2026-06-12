@@ -57,6 +57,8 @@ def checkout():
     donor_email = (body.get("donor_email") or "").strip() or None
     message = (body.get("message") or "").strip() or None
     raffle_display_consent = bool(body.get("raffle_display_consent", False))
+    donor_first_name = (body.get("donor_first_name") or "").strip() or None
+    donor_last_name = (body.get("donor_last_name") or "").strip() or None
     if not campaign_id or amount is None:
         return jsonify({"error": "campaign_id and amount are required"}), 400
     try:
@@ -70,5 +72,7 @@ def checkout():
         donor_email=donor_email,
         message=message,
         raffle_display_consent=raffle_display_consent,
+        donor_first_name=donor_first_name,
+        donor_last_name=donor_last_name,
     )
     return jsonify(resp), (200 if "clientSecret" in resp else 400)

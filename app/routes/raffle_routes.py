@@ -1,4 +1,5 @@
 from __future__ import annotations
+import hashlib
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
 from datetime import datetime, timezone
@@ -16,7 +17,11 @@ from app.models.campaign import get_campaign
 from app.models.org_user import get_user_role_in_org
 from app.utils.tier_features import get_org_tier, TIER_LIMITS
 from app.utils.rate_limit import is_rate_limited, rate_limit_key, rate_limit_exceeded_response
-from app.services.raffle_service import claim_prize
+from app.services.raffle_service import (
+    validate_claim_token,
+    claim_prize,
+    RAFFLE_CLAIM_WINDOW_HOURS,
+)
 from app.utils.db import get_db_connection
 
 raffle_bp = Blueprint("raffles", __name__)
@@ -49,9 +54,11 @@ def _serialize_raffle(raffle: dict, include_winner_email: bool = False) -> dict:
         "prize_name": raffle["prize_name"],
         "prize_description": raffle.get("prize_description"),
         "prize_image_url": raffle.get("prize_image_url"),
+        "prize_value_cents": raffle.get("prize_value_cents"),
         "status": raffle["status"],
         "redraw_count": raffle.get("redraw_count", 0),
         "max_redraws": raffle.get("max_redraws", 5),
+        "void_redraws": raffle.get("void_redraws", 0),
         "claim_deadline": raffle["claim_deadline"].isoformat() if raffle.get("claim_deadline") else None,
         "created_at": raffle["created_at"].isoformat() if raffle.get("created_at") else None,
         "ended_at": raffle["ended_at"].isoformat() if raffle.get("ended_at") else None,
@@ -110,6 +117,17 @@ def create_campaign_raffle(campaign_id: str):
         return jsonify({"error": "prize_description must be 1000 characters or fewer"}), 400
 
     prize_image_url = (body.get("prize_image_url") or "").strip() or None
+
+    prize_value_cents = body.get("prize_value_cents")
+    if prize_value_cents is None:
+        return jsonify({"error": "prize_value_cents is required"}), 400
+    try:
+        prize_value_cents = int(prize_value_cents)
+        if prize_value_cents <= 0:
+            raise ValueError
+    except (ValueError, TypeError):
+        return jsonify({"error": "prize_value_cents must be a positive integer (in cents)"}), 400
+
     compliance_ack = body.get("compliance_ack", False)
     if not compliance_ack:
         return jsonify({"error": "compliance acknowledgment is required"}), 400
@@ -120,6 +138,7 @@ def create_campaign_raffle(campaign_id: str):
         prize_description=prize_description,
         prize_image_url=prize_image_url,
         compliance_ack_at=_now_utc(),
+        prize_value_cents=prize_value_cents,
     )
     return jsonify(_serialize_raffle(raffle)), 201
 
@@ -163,6 +182,15 @@ def update_campaign_raffle(campaign_id: str):
 
     if "prize_image_url" in body:
         updates["prize_image_url"] = (body["prize_image_url"] or "").strip() or None
+
+    if "prize_value_cents" in body:
+        try:
+            val = int(body["prize_value_cents"])
+            if val <= 0:
+                raise ValueError
+            updates["prize_value_cents"] = val
+        except (ValueError, TypeError):
+            return jsonify({"error": "prize_value_cents must be a positive integer"}), 400
 
     if not updates:
         return jsonify(_serialize_raffle(raffle)), 200
@@ -243,11 +271,12 @@ def get_public_raffle(slug: str):
     if not raffle:
         return jsonify({"raffle": None}), 200
 
-    campaign_end_date = camp.get("updated_at") or camp.get("created_at")
+    campaign_end_date = camp.get("ends_at") or camp.get("updated_at") or camp.get("created_at")
 
     payload = _serialize_raffle(raffle)
     payload["campaign_end_date"] = campaign_end_date.isoformat() if campaign_end_date else None
     payload["free_entry_url"] = f"/campaigns/{slug}/raffle/free-entry"
+    payload["rules_url"] = f"/campaigns/{slug}/raffle/rules"
     payload["entry_count"] = get_entry_count(raffle["id"])
     return jsonify({"raffle": payload}), 200
 
@@ -264,6 +293,7 @@ def free_entry_info(slug: str):
         "prize_name": raffle["prize_name"],
         "prize_description": raffle.get("prize_description"),
         "prize_image_url": raffle.get("prize_image_url"),
+        "prize_value_cents": raffle.get("prize_value_cents"),
         "campaign_title": camp.get("title"),
     }), 200
 
@@ -292,8 +322,7 @@ def submit_free_entry(slug: str):
     if not donor_first_name or not donor_last_name:
         return jsonify({"error": "first_name and last_name are required"}), 400
 
-    from app.utils.db import get_db_connection as _db
-    with _db() as conn, conn.cursor() as cur:
+    with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT id FROM raffle_entries WHERE raffle_id = %s AND donor_email = %s",
             (raffle["id"], donor_email),
@@ -301,7 +330,7 @@ def submit_free_entry(slug: str):
         if cur.fetchone():
             return jsonify({"error": "this email is already entered in the raffle"}), 409
 
-    upsert_raffle_entry(
+    entry = upsert_raffle_entry(
         raffle_id=raffle["id"],
         donor_email=donor_email,
         donor_first_name=donor_first_name,
@@ -310,13 +339,84 @@ def submit_free_entry(slug: str):
         source="free_entry",
         donation_id=None,
     )
+
+    try:
+        from app.services.raffle_email_service import send_raffle_free_entry_confirmation
+        send_raffle_free_entry_confirmation(entry, raffle)
+    except Exception as e:
+        print(f"[raffle] free_entry_confirmation email error: {e}", flush=True)
+
     return jsonify({"message": "You've been entered! Good luck."}), 201
 
 
+# ---------------------------------------------------------------------------
+# Claim routes (two-step)
+# ---------------------------------------------------------------------------
+
 @raffle_bp.get("/api/raffles/claim")
-def claim_raffle_prize():
+def validate_claim():
+    """Step 1: validate token and return prize info. Does NOT claim."""
     token = request.args.get("token", "")
     if not token:
         return jsonify({"error": "token is required"}), 400
-    status_code, payload = claim_prize(token)
+    status_code, payload = validate_claim_token(token)
     return jsonify(payload), status_code
+
+
+@raffle_bp.post("/api/raffles/claim")
+def do_claim():
+    """Step 2: confirm email and complete the claim."""
+    body = request.get_json(force=True, silent=True) or {}
+    token = (body.get("token") or "").strip()
+    email = (body.get("email") or "").strip().lower()
+
+    if not token:
+        return jsonify({"error": "token is required"}), 400
+    if not email:
+        return jsonify({"error": "email is required"}), 400
+
+    # Rate limit failed attempts per token to prevent guessing
+    attempt_key = f"raffle_claim_attempt:{hashlib.sha256(token.encode()).hexdigest()[:16]}"
+    if is_rate_limited(attempt_key, limit=5, window_seconds=3600):
+        return jsonify({"error": "Too many failed attempts. Please try again in 1 hour."}), 429
+
+    status_code, payload = claim_prize(token, email)
+
+    if status_code == 400 and payload.get("error") == "email_mismatch":
+        # Consume an attempt on mismatch
+        is_rate_limited(attempt_key, limit=5, window_seconds=3600)
+        return jsonify({"error": "Email does not match. Please check and try again."}), 400
+
+    return jsonify(payload), status_code
+
+
+# ---------------------------------------------------------------------------
+# Official rules page (public)
+# ---------------------------------------------------------------------------
+
+@raffle_bp.get("/api/campaigns/<slug>/raffle/rules")
+def get_raffle_rules(slug: str):
+    camp = _get_campaign_by_slug_or_id(slug)
+    if not camp:
+        return jsonify({"error": "campaign not found"}), 404
+    raffle = get_raffle_by_campaign(camp["id"])
+    if not raffle:
+        return jsonify({"error": "no raffle for this campaign"}), 404
+
+    from app.models.org import get_organization
+    org = get_organization(camp["org_id"])
+
+    entry_start = camp.get("created_at")
+    entry_end = camp.get("ends_at")
+
+    return jsonify({
+        "org_name": (org or {}).get("name", "the organization"),
+        "campaign_title": camp.get("title"),
+        "entry_period_start": entry_start.isoformat() if entry_start else None,
+        "entry_period_end": entry_end.isoformat() if entry_end else None,
+        "prize_name": raffle["prize_name"],
+        "prize_description": raffle.get("prize_description"),
+        "prize_value_cents": raffle.get("prize_value_cents"),
+        "free_entry_url": f"/campaigns/{slug}/raffle/free-entry",
+        "claim_window_hours": RAFFLE_CLAIM_WINDOW_HOURS,
+    }), 200

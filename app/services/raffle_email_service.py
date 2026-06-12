@@ -12,9 +12,9 @@ FROM_NAME_DEFAULT = "HelpingHandsFund"
 
 
 def _get_org(campaign_id: str) -> Optional[Dict[str, Any]]:
-    from app.models.campaign import get_campaign_by_id
+    from app.models.campaign import get_campaign
     from app.models.org import get_organization
-    camp = get_campaign_by_id(campaign_id)
+    camp = get_campaign(campaign_id)
     if not camp:
         return None
     return get_organization(camp["org_id"])
@@ -50,6 +50,7 @@ def send_raffle_winner_email(
     claim_url: str,
 ) -> None:
     """Notify the winner with their claim link."""
+    from app.services.raffle_service import RAFFLE_CLAIM_WINDOW_HOURS
     to_email = entry.get("donor_email")
     if not to_email:
         return
@@ -59,8 +60,10 @@ def send_raffle_winner_email(
     body = (
         f"Hi {name},\n\n"
         f"Great news — you've been drawn as the winner of the raffle for \"{prize}\"!\n\n"
-        f"You have 24 hours to claim your prize. Click the link below to claim:\n"
+        f"You have {RAFFLE_CLAIM_WINDOW_HOURS} hours to claim your prize. "
+        f"Click the link below to claim:\n"
         f"{claim_url}\n\n"
+        f"You will be asked to confirm the email address you used to enter the raffle.\n\n"
         f"If you did not enter this raffle or have any questions, please ignore this email.\n\n"
         f"— The HelpingHandsFund Team\n"
     )
@@ -73,6 +76,7 @@ def send_raffle_org_winner_drawn(
     winner_entry: Dict[str, Any],
 ) -> None:
     """Notify org that a winner has been drawn."""
+    from app.services.raffle_service import RAFFLE_CLAIM_WINDOW_HOURS
     org = _get_org(raffle.get("campaign_id", ""))
     if not org:
         return
@@ -86,7 +90,7 @@ def send_raffle_org_winner_drawn(
         f"Hi {org.get('name', 'there')},\n\n"
         f"A winner has been drawn for your raffle \"{prize}\".\n\n"
         f"Winner: {winner_email}\n\n"
-        f"They have 24 hours to claim their prize via the link sent to them.\n"
+        f"They have {RAFFLE_CLAIM_WINDOW_HOURS} hours to claim their prize via the link sent to them.\n"
         f"You'll receive another notification when they claim.\n\n"
         f"— HelpingHandsFund\n"
     )
@@ -158,3 +162,52 @@ def send_raffle_org_no_entries(raffle: Dict[str, Any]) -> None:
         f"— HelpingHandsFund\n"
     )
     _send(owner_email, subject, body, org_id=org.get("id"))
+
+
+def send_raffle_org_winner_voided(
+    raffle: Dict[str, Any],
+    voided_entry: Dict[str, Any],
+    reason: str,
+) -> None:
+    """Notify org that a winner's donation was refunded/disputed and a new draw has been triggered."""
+    org = _get_org(raffle.get("campaign_id", ""))
+    if not org:
+        return
+    owner_email = org.get("billing_email") or org.get("email")
+    if not owner_email:
+        return
+    prize = raffle.get("prize_name", "the prize")
+    prev_email = voided_entry.get("donor_email", "unknown")
+    reason_label = "disputed" if reason == "chargeback" else "refunded"
+    subject = f"Raffle winner update — previous winner's donation was {reason_label}"
+    body = (
+        f"Hi {org.get('name', 'there')},\n\n"
+        f"The previous winner's donation for your raffle \"{prize}\" was {reason_label}.\n"
+        f"A new winner has been drawn automatically.\n\n"
+        f"Previous winner: {prev_email}\n\n"
+        f"You will receive a separate notification about the new winner.\n\n"
+        f"— HelpingHandsFund\n"
+    )
+    _send(owner_email, subject, body, org_id=org.get("id"))
+
+
+def send_raffle_free_entry_confirmation(
+    entry: Dict[str, Any],
+    raffle: Dict[str, Any],
+) -> None:
+    """Confirm free entry to the entrant."""
+    to_email = entry.get("donor_email")
+    if not to_email:
+        return
+    prize = raffle.get("prize_name", "the prize")
+    name = entry.get("donor_first_name") or "there"
+    subject = f"You're entered in the raffle for {prize}"
+    body = (
+        f"Hi {name},\n\n"
+        f"You've been entered in the raffle for \"{prize}\"!\n\n"
+        f"This email address is how we'll contact you if you win.\n\n"
+        f"Good luck!\n\n"
+        f"— The HelpingHandsFund Team\n"
+    )
+    org = _get_org(raffle.get("campaign_id", ""))
+    _send(to_email, subject, body, org_id=(org or {}).get("id"))
