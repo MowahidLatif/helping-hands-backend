@@ -242,6 +242,14 @@ def _apply_status_update(
                         source="donation",
                         donation_id=str(d["id"]),
                     )
+                    try:
+                        socketio.emit(
+                            "raffle_entry",
+                            {"campaign_id": str(d["campaign_id"]), "raffle_id": str(raffle["id"])},
+                            to=f"campaign:{d['campaign_id']}",
+                        )
+                    except Exception as se:
+                        print(f"[raffle] socketio emit raffle_entry error: {se}", flush=True)
         except Exception as raffle_err:
             print(f"[raffle entry upsert error] {raffle_err}", flush=True)
 

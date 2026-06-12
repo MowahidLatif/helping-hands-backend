@@ -191,6 +191,111 @@ def send_raffle_org_winner_voided(
     _send(owner_email, subject, body, org_id=org.get("id"))
 
 
+def send_raffle_threshold_not_met(raffle: Dict[str, Any], actual_count: int) -> None:
+    """Notify org and all entrants when min_entries threshold was not met."""
+    from app.models.raffle import get_raffle_entries
+    org = _get_org(raffle.get("campaign_id", ""))
+    prize = raffle.get("prize_name", "the prize")
+    min_e = raffle.get("min_entries", 0)
+
+    # Org notification
+    if org:
+        owner_email = org.get("billing_email") or org.get("email")
+        if owner_email:
+            subject = f"Raffle cancelled — minimum entries not reached for \"{prize}\""
+            body = (
+                f"Hi {org.get('name', 'there')},\n\n"
+                f"Your raffle for \"{prize}\" required a minimum of {min_e} entries "
+                f"but only received {actual_count}. The raffle has been cancelled.\n\n"
+                f"All entrants will be notified by email.\n\n"
+                f"— HelpingHandsFund\n"
+            )
+            _send(owner_email, subject, body, org_id=org.get("id"))
+
+    # Entrant notifications
+    entries = get_raffle_entries(raffle["id"])
+    for entry in entries:
+        to_email = entry.get("donor_email")
+        if not to_email or entry.get("voided"):
+            continue
+        name = entry.get("donor_first_name") or "there"
+        campaign_title = org.get("name", "the campaign") if org else "the campaign"
+        subject = f"Raffle update for \"{prize}\""
+        body = (
+            f"Hi {name},\n\n"
+            f"The raffle for \"{prize}\" hosted by {campaign_title} was cancelled because "
+            f"it did not reach the minimum required number of entries.\n\n"
+            f"Your support for the campaign still made a difference — thank you!\n\n"
+            f"— HelpingHandsFund\n"
+        )
+        try:
+            _send(to_email, subject, body, org_id=(org or {}).get("id"))
+        except Exception as e:
+            print(f"[raffle-email] threshold_not_met entrant {to_email}: {e}", flush=True)
+
+
+def send_deletion_confirmation_email(donor_email: str, raffle: Dict[str, Any]) -> None:
+    """Confirm to the user that their entry data has been deleted."""
+    prize = raffle.get("prize_name", "the raffle")
+    subject = f"Your data has been removed from the \"{prize}\" raffle"
+    body = (
+        f"Hi,\n\n"
+        f"As requested, your entry data has been permanently deleted from the raffle for "
+        f"\"{prize}\".\n\n"
+        f"If you did not request this, please contact us.\n\n"
+        f"— HelpingHandsFund\n"
+    )
+    org = _get_org(raffle.get("campaign_id", ""))
+    _send(donor_email, subject, body, org_id=(org or {}).get("id"))
+
+
+def send_raffle_non_winner_email(entry: Dict[str, Any], raffle: Dict[str, Any]) -> None:
+    """Thank non-winners after a raffle is claimed."""
+    to_email = entry.get("donor_email")
+    if not to_email:
+        return
+    org = _get_org(raffle.get("campaign_id", ""))
+    org_name = (org or {}).get("name", "the organization")
+    prize = raffle.get("prize_name", "the prize")
+    name = entry.get("donor_first_name") or "there"
+    subject = f"Raffle results for \"{prize}\""
+    body = (
+        f"Hi {name},\n\n"
+        f"Thank you for entering the raffle for \"{prize}\".\n\n"
+        f"Unfortunately you weren't selected as the winner this time, but your support of "
+        f"{org_name} made a real difference. ❤️\n\n"
+        f"We hope to see you in future campaigns!\n\n"
+        f"— HelpingHandsFund\n"
+    )
+    _send(to_email, subject, body, org_id=(org or {}).get("id"))
+
+
+def send_raffle_purge_notifications(raffle: Dict[str, Any], emails: list) -> None:
+    """Notify entrants that their data has been purged after the 30-day retention period."""
+    if not emails:
+        return
+    org = _get_org(raffle.get("campaign_id", ""))
+    prize = raffle.get("prize_name", "the raffle")
+    subject = f"Your data from the \"{prize}\" raffle has been deleted"
+    body_template = (
+        "Hi,\n\n"
+        f"Your entry data from the raffle for \"{prize}\" has been permanently deleted from "
+        "our platform as part of our 30-day data retention policy.\n\n"
+        "We keep personal information only as long as needed — that's a promise.\n\n"
+        "— HelpingHandsFund\n"
+    )
+    org_id = (org or {}).get("id")
+    # Send in chunks of 500
+    chunk_size = 500
+    for i in range(0, len(emails), chunk_size):
+        chunk = emails[i:i + chunk_size]
+        for to_email in chunk:
+            try:
+                _send(to_email, subject, body_template, org_id=org_id)
+            except Exception as e:
+                print(f"[purge email] {to_email}: {e}", flush=True)
+
+
 def send_raffle_free_entry_confirmation(
     entry: Dict[str, Any],
     raffle: Dict[str, Any],

@@ -10,7 +10,7 @@ _ORG_SELECT_COLS = """
   stripe_customer_id, stripe_subscription_id, subscription_status,
   subscription_current_period_end, pending_tier,
   subscription_cancel_at_period_end, subscription_cancel_at,
-  billing_interval, trial_ends_at, payment_grace_ends_at
+  billing_interval, trial_ends_at, payment_grace_ends_at, timezone
 """
 
 
@@ -36,6 +36,7 @@ def _row_to_org(row: tuple) -> dict[str, Any]:
         "billing_interval": row[17],
         "trial_ends_at": row[18],
         "payment_grace_ends_at": row[19],
+        "timezone": row[20] or "UTC",
     }
 
 
@@ -46,21 +47,23 @@ def create_organization(
     *,
     pending_tier: int | None = None,
     subscription_status: str = "none",
+    timezone: str = "UTC",
 ):
     sub = _slugify(subdomain or name) or f"org-{secrets.token_hex(3)}"
     tier = int(tier) if tier in (1, 2, 3) else 1
     pending = int(pending_tier) if pending_tier in (1, 2, 3) else None
     status = (subscription_status or "none").strip().lower()
+    tz = (timezone or "UTC").strip()[:64] or "UTC"
 
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
             """
             INSERT INTO organizations (
-              name, subdomain, tier, pending_tier, subscription_status
-            ) VALUES (%s, %s, %s, %s, %s)
+              name, subdomain, tier, pending_tier, subscription_status, timezone
+            ) VALUES (%s, %s, %s, %s, %s, %s)
             RETURNING id, name, subdomain, tier, pending_tier, subscription_status
             """,
-            (name, sub, tier, pending, status),
+            (name, sub, tier, pending, status, tz),
         )
         row = cur.fetchone()
         conn.commit()
@@ -256,6 +259,16 @@ def upsert_org_payout_account(
     params.append(org_id)
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, tuple(params))
+        row = cur.fetchone()
+        conn.commit()
+        return get_organization(str(row[0])) if row else None
+
+
+def update_org_timezone(org_id: str, timezone: str) -> dict[str, Any] | None:
+    tz = (timezone or "UTC").strip()[:64]
+    sql = "UPDATE organizations SET timezone = %s, updated_at = now() WHERE id = %s RETURNING id"
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (tz, org_id))
         row = cur.fetchone()
         conn.commit()
         return get_organization(str(row[0])) if row else None

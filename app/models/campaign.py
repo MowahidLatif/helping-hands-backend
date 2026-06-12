@@ -418,6 +418,27 @@ def complete_campaign_if_goal_reached(campaign_id: str) -> bool:
         return cur.rowcount > 0
 
 
+def force_complete_campaign(campaign_id: str) -> bool:
+    """Mark campaign as completed regardless of goal. Returns True if transition occurred."""
+    sql = """
+    UPDATE campaigns
+    SET status = 'completed', updated_at = now()
+    WHERE id = %s AND status = 'active'
+    """
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (campaign_id,))
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def get_active_campaigns_past_end_date() -> list[str]:
+    """Return IDs of active campaigns whose ends_at has passed."""
+    sql = "SELECT id FROM campaigns WHERE ends_at <= NOW() AND status = 'active'"
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql)
+        return [row[0] for row in cur.fetchall()]
+
+
 def get_goal_and_total(campaign_id: str) -> tuple[float, float] | None:
     sql = "SELECT goal, total_raised FROM campaigns WHERE id = %s"
     with get_db_connection() as conn, conn.cursor() as cur:

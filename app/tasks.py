@@ -177,6 +177,100 @@ def run_billing_grace_expiry() -> int:
 
 
 def run_raffle_redraw_check() -> int:
-    """RQ/cron: expire pending raffle claims and trigger redraws."""
+    """RQ/cron (hourly): expire pending raffle claims and trigger redraws."""
     from app.services.raffle_service import process_expired_claims
-    return process_expired_claims()
+    result = process_expired_claims()
+    _enqueue_hourly(run_raffle_redraw_check)
+    return result
+
+
+def run_campaign_end_date_check() -> int:
+    """RQ/cron (hourly): complete campaigns whose ends_at has passed, queue payout, trigger raffle draw."""
+    from app.services.raffle_service import run_campaign_end_date_check as _check
+    result = _check()
+    _enqueue_hourly(run_campaign_end_date_check)
+    return result
+
+
+def run_raffle_sweep_job() -> int:
+    """RQ/cron (hourly): catch stranded active raffles whose campaigns already completed."""
+    from app.services.raffle_service import run_raffle_sweep_job as _sweep
+    result = _sweep()
+    _enqueue_hourly(run_raffle_sweep_job)
+    return result
+
+
+def run_raffle_purge_job() -> int:
+    """RQ/cron (nightly): delete entrant data from raffles ended 30+ days ago."""
+    from app.services.raffle_service import run_raffle_purge_job as _purge
+    return _purge()
+
+
+def enqueue_non_winner_emails(raffle_id: str) -> bool:
+    """Enqueue non-winner thank-you emails after a raffle is claimed."""
+    use_queue = os.getenv("USE_EMAIL_QUEUE", "0") == "1"
+    if not use_queue:
+        task_send_non_winner_emails(raffle_id)
+        return False
+    try:
+        from redis import Redis
+        from rq import Queue
+        conn = Redis.from_url(REDIS_URL, decode_responses=False)
+        q = Queue("default", connection=conn)
+        q.enqueue(task_send_non_winner_emails, raffle_id, job_timeout="10m")
+        return True
+    except Exception:
+        task_send_non_winner_emails(raffle_id)
+        return False
+
+
+def task_send_non_winner_emails(raffle_id: str) -> None:
+    """Send non-winner thank-you emails for all non-winning, non-voided entrants."""
+    from app.models.raffle import get_raffle_by_id, get_all_entries_for_raffle
+    from app.services.raffle_email_service import send_raffle_non_winner_email
+
+    raffle = get_raffle_by_id(raffle_id)
+    if not raffle:
+        return
+    entries = get_all_entries_for_raffle(raffle_id)
+    winner_id = raffle.get("winner_entry_id")
+    non_winners = [
+        e for e in entries
+        if e["id"] != winner_id and not e.get("voided") and not e.get("deletion_requested")
+    ]
+    for entry in non_winners:
+        try:
+            send_raffle_non_winner_email(entry, raffle)
+        except Exception as e:
+            logger.error("send non-winner email to %s: %s", entry.get("donor_email"), e)
+
+
+def _enqueue_hourly(fn) -> None:
+    """Re-enqueue fn to run again in 1 hour via RQ built-in scheduler."""
+    from datetime import timedelta
+    try:
+        from redis import Redis
+        from rq import Queue
+        conn = Redis.from_url(REDIS_URL, decode_responses=False)
+        Queue("default", connection=conn).enqueue_in(timedelta(hours=1), fn)
+    except Exception as e:
+        logger.warning("Could not reschedule %s: %s", getattr(fn, "__name__", fn), e)
+
+
+def register_scheduled_jobs() -> None:
+    """
+    Seed the RQ scheduler with the first run of all recurring hourly jobs.
+    Call once after deploying: poetry run python -c 'from app.tasks import register_scheduled_jobs; register_scheduled_jobs()'
+    Each job self-reschedules via _enqueue_hourly() after it runs.
+    """
+    from datetime import timedelta
+    try:
+        from redis import Redis
+        from rq import Queue
+        conn = Redis.from_url(REDIS_URL, decode_responses=False)
+        q = Queue("default", connection=conn)
+        for fn in (run_raffle_redraw_check, run_campaign_end_date_check, run_raffle_sweep_job):
+            q.enqueue_in(timedelta(minutes=5), fn)
+        logger.info("Hourly background jobs seeded into RQ scheduler.")
+    except Exception as e:
+        logger.error("Failed to seed scheduled jobs: %s", e)

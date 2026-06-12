@@ -82,6 +82,7 @@ def signup_user(data: dict) -> dict:
         data.get("org_name") or data.get("organization_name") or ""
     ).strip() or None
     org_subdomain = (data.get("org_subdomain") or "").strip() or None
+    org_timezone = (data.get("timezone") or "UTC").strip()[:64] or "UTC"
     try:
         org_tier = int(data.get("org_tier") or 1)
         if org_tier not in (1, 2, 3):
@@ -105,6 +106,7 @@ def signup_user(data: dict) -> dict:
         tier=1,
         pending_tier=org_tier,
         subscription_status="none",
+        timezone=org_timezone,
     )
     add_user_to_org(org_id=org["id"], user_id=user["id"], role="owner")
 

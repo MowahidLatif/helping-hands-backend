@@ -165,6 +165,15 @@ def _inject_raffle_block_if_active(campaign_id: str, recipe: dict[str, Any]) -> 
         import uuid as _uuid
         camp = get_campaign(campaign_id)
         slug = (camp or {}).get("slug", campaign_id)
+        camp_end = camp.get("ends_at") if camp else None
+        org_timezone = "UTC"
+        if camp and camp.get("org_id"):
+            try:
+                from app.models.org import get_organization
+                org = get_organization(camp["org_id"])
+                org_timezone = (org or {}).get("timezone", "UTC") or "UTC"
+            except Exception:
+                pass
         raffle_node = {
             "id": f"raffle-{_uuid.uuid4().hex[:8]}",
             "type": "raffle_block",
@@ -172,10 +181,13 @@ def _inject_raffle_block_if_active(campaign_id: str, recipe: dict[str, Any]) -> 
                 "prize_name": raffle.get("prize_name"),
                 "prize_description": raffle.get("prize_description"),
                 "prize_image_url": raffle.get("prize_image_url"),
+                "prize_value_cents": raffle.get("prize_value_cents"),
                 "status": raffle.get("status", "active"),
-                "campaign_end_date": None,
+                "campaign_end_date": camp_end.isoformat() if camp_end else None,
+                "timezone": org_timezone,
                 "winner_display_name": None,
                 "free_entry_url": f"/campaigns/{slug}/raffle/free-entry",
+                "rules_url": f"/campaigns/{slug}/raffle/rules",
             },
         }
         nodes = recipe.get("nodes", [])

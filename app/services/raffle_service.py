@@ -21,6 +21,11 @@ from app.models.raffle import (
     get_entry_by_donation,
     void_raffle_entry,
     get_valid_donation_count_for_entry,
+    get_deletion_requested_entries,
+    hard_delete_entries_by_ids,
+    get_all_entries_for_raffle,
+    delete_all_entries_for_raffle,
+    anonymize_draw_log,
 )
 
 _SIGNING_SECRET = os.getenv("JWT_SECRET", "dev-secret")
@@ -58,18 +63,33 @@ def _token_attempt_key(token: str) -> str:
     return f"raffle_claim_attempt:{digest}"
 
 
-def execute_raffle_draw(raffle_id: str) -> None:
+def execute_raffle_draw(raffle_id: str, triggered_by: str = "scheduler") -> None:
     """Draw a winner for the given raffle. Handles no-entries case (cancels raffle)."""
     from app.services.raffle_email_service import (
         send_raffle_winner_email,
         send_raffle_org_winner_drawn,
         send_raffle_org_no_entries,
+        send_raffle_threshold_not_met,
     )
     from app.models.campaign import get_campaign
+    from app.models.raffle import get_entry_count
 
     raffle = get_raffle_by_id(raffle_id)
     if not raffle:
         return
+
+    # Scale-only: minimum entry threshold check
+    min_entries = raffle.get("min_entries")
+    if min_entries:
+        actual_count = get_entry_count(raffle_id)
+        if actual_count < min_entries:
+            update_raffle(raffle_id, status="cancelled_threshold", ended_at=_now_utc())
+            _cleanup_deletion_requested(raffle_id, raffle)
+            try:
+                send_raffle_threshold_not_met(raffle, actual_count)
+            except Exception as e:
+                print(f"[raffle] send_raffle_threshold_not_met error: {e}", flush=True)
+            return
 
     # Look up org for self-dealing exclusion check
     camp = get_campaign(raffle["campaign_id"])
@@ -78,6 +98,7 @@ def execute_raffle_draw(raffle_id: str) -> None:
     entries = get_undrawn_entries(raffle_id)
     if not entries:
         update_raffle(raffle_id, status="cancelled", ended_at=_now_utc())
+        _cleanup_deletion_requested(raffle_id, raffle)
         try:
             send_raffle_org_no_entries(raffle)
         except Exception as e:
@@ -88,7 +109,7 @@ def execute_raffle_draw(raffle_id: str) -> None:
     winner = secrets.choice(entries)
     remaining = list(entries)
     while winner["donor_email"].lower() in member_emails:
-        create_draw_log(raffle_id, winner["id"], outcome="ineligible")
+        create_draw_log(raffle_id, winner["id"], outcome="ineligible", triggered_by=triggered_by)
         remaining = [e for e in remaining if e["id"] != winner["id"]]
         if not remaining:
             winner = None
@@ -97,6 +118,7 @@ def execute_raffle_draw(raffle_id: str) -> None:
 
     if winner is None:
         update_raffle(raffle_id, status="cancelled", ended_at=_now_utc())
+        _cleanup_deletion_requested(raffle_id, raffle)
         try:
             send_raffle_org_no_entries(raffle)
         except Exception as e:
@@ -112,7 +134,7 @@ def execute_raffle_draw(raffle_id: str) -> None:
         claim_deadline=claim_deadline,
         ended_at=_now_utc(),
     )
-    create_draw_log(raffle_id, winner["id"])
+    create_draw_log(raffle_id, winner["id"], triggered_by=triggered_by)
 
     claim_token = generate_claim_token(raffle_id, winner["id"])
     claim_url = _build_claim_url(claim_token)
@@ -173,6 +195,132 @@ def process_expired_claims() -> int:
                 print(f"[raffle] redraw error for {raffle_id}: {e}", flush=True)
         count += 1
     return count
+
+
+def run_campaign_end_date_check() -> int:
+    """Hourly job: complete campaigns whose ends_at has passed, then trigger payout + raffle draw."""
+    from app.models.campaign import get_active_campaigns_past_end_date, force_complete_campaign
+    from app.tasks import enqueue_campaign_payout
+
+    count = 0
+    for campaign_id in get_active_campaigns_past_end_date():
+        did_complete = force_complete_campaign(campaign_id)
+        if did_complete:
+            try:
+                enqueue_campaign_payout(campaign_id)
+            except Exception as e:
+                print(f"[end-date payout error] campaign={campaign_id}: {e}", flush=True)
+            try:
+                trigger_raffle_draw_if_active(campaign_id)
+            except Exception as e:
+                print(f"[end-date raffle draw error] campaign={campaign_id}: {e}", flush=True)
+            count += 1
+    return count
+
+
+def _cleanup_deletion_requested(raffle_id: str, raffle: dict) -> None:
+    """After a raffle reaches a terminal state, hard-delete any deletion-requested entries."""
+    try:
+        from app.services.raffle_email_service import send_deletion_confirmation_email
+        entries = get_deletion_requested_entries(raffle_id)
+        if entries:
+            hard_delete_entries_by_ids([e["id"] for e in entries])
+            for entry in entries:
+                try:
+                    send_deletion_confirmation_email(entry["donor_email"], raffle)
+                except Exception as e:
+                    print(f"[deletion confirm email] {entry.get('donor_email')}: {e}", flush=True)
+    except Exception as e:
+        print(f"[deletion cleanup] raffle={raffle_id}: {e}", flush=True)
+
+
+def run_raffle_purge_job() -> int:
+    """Nightly job: purge entrant data from raffles that ended more than 30 days ago."""
+    from app.utils.db import get_db_connection
+    from app.services.raffle_email_service import send_raffle_purge_notifications
+
+    sql = """
+        SELECT id, ended_at, prize_name, campaign_id
+        FROM raffles
+        WHERE status IN ('claimed', 'unclaimed', 'cancelled', 'cancelled_threshold')
+          AND ended_at < NOW() - INTERVAL '30 days'
+          AND EXISTS (
+              SELECT 1 FROM raffle_entries WHERE raffle_id = raffles.id
+          )
+    """
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql)
+        rows = cur.fetchall()
+        cols = [d[0] for d in cur.description]
+        due = [dict(zip(cols, r)) for r in rows]
+
+    count = 0
+    for raffle in due:
+        raffle_id = raffle["id"]
+        try:
+            entries = get_all_entries_for_raffle(raffle_id)
+            purge_emails = [
+                e["donor_email"]
+                for e in entries
+                if e.get("donor_email") and not e.get("deletion_requested")
+            ]
+            delete_all_entries_for_raffle(raffle_id)
+            anonymize_draw_log(raffle_id)
+            if purge_emails:
+                try:
+                    send_raffle_purge_notifications(raffle, purge_emails)
+                except Exception as e:
+                    print(f"[purge notifications] raffle={raffle_id}: {e}", flush=True)
+            count += 1
+        except Exception as e:
+            print(f"[purge job] raffle={raffle_id}: {e}", flush=True)
+
+    return count
+
+
+def _emit_cloudwatch_metric(name: str, value: float = 1.0) -> None:
+    try:
+        import boto3
+        boto3.client("cloudwatch").put_metric_data(
+            Namespace="HHF/Raffle",
+            MetricData=[{"MetricName": name, "Value": value, "Unit": "Count"}],
+        )
+    except Exception as e:
+        print(f"[cloudwatch metric error] name={name}: {e}", flush=True)
+
+
+def run_raffle_sweep_job() -> int:
+    """
+    Hourly sweep: find raffles that are still 'active' but their campaign
+    completed more than 1 hour ago (scheduler miss recovery).
+    """
+    sql = """
+        SELECT r.id
+        FROM raffles r
+        JOIN campaigns c ON c.id = r.campaign_id
+        WHERE r.status = 'active'
+          AND c.status = 'completed'
+          AND c.updated_at < NOW() - INTERVAL '1 hour'
+    """
+    from app.utils.db import get_db_connection
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql)
+        stranded_ids = [row[0] for row in cur.fetchall()]
+
+    caught = 0
+    for raffle_id in stranded_ids:
+        update_raffle(raffle_id, status="drawing")
+        try:
+            execute_raffle_draw(raffle_id, triggered_by="sweep")
+            caught += 1
+        except Exception as e:
+            print(f"[raffle sweep] draw error for raffle {raffle_id}: {e}", flush=True)
+            update_raffle(raffle_id, status="active")
+
+    if caught > 0:
+        _emit_cloudwatch_metric("RaffleSweepCaught", float(caught))
+
+    return caught
 
 
 def validate_claim_token(token: str) -> Tuple[int, Dict[str, Any]]:
@@ -273,11 +421,18 @@ def claim_prize(token: str, email: str) -> Tuple[int, Dict[str, Any]]:
         update_draw_log(log["id"], outcome="claimed", claimed_at=now)
 
     update_raffle(raffle_id, status="claimed", claim_token_used_at=now)
+    _cleanup_deletion_requested(raffle_id, raffle)
 
     try:
         send_raffle_org_winner_claimed(raffle, entry)
     except Exception as e:
         print(f"[raffle] send_raffle_org_winner_claimed error: {e}", flush=True)
+
+    try:
+        from app.tasks import enqueue_non_winner_emails
+        enqueue_non_winner_emails(raffle_id)
+    except Exception as e:
+        print(f"[raffle] enqueue_non_winner_emails error: {e}", flush=True)
 
     from app.models.campaign import get_campaign
     campaign = get_campaign(raffle.get("campaign_id", ""))

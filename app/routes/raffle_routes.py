@@ -12,6 +12,7 @@ from app.models.raffle import (
     upsert_raffle_entry,
     get_entry_count,
     get_draw_log_for_raffle,
+    get_raffle_entries,
 )
 from app.models.campaign import get_campaign
 from app.models.org_user import get_user_role_in_org
@@ -55,6 +56,7 @@ def _serialize_raffle(raffle: dict, include_winner_email: bool = False) -> dict:
         "prize_description": raffle.get("prize_description"),
         "prize_image_url": raffle.get("prize_image_url"),
         "prize_value_cents": raffle.get("prize_value_cents"),
+        "min_entries": raffle.get("min_entries"),
         "status": raffle["status"],
         "redraw_count": raffle.get("redraw_count", 0),
         "max_redraws": raffle.get("max_redraws", 5),
@@ -132,6 +134,18 @@ def create_campaign_raffle(campaign_id: str):
     if not compliance_ack:
         return jsonify({"error": "compliance acknowledgment is required"}), 400
 
+    min_entries = None
+    if "min_entries" in body:
+        locked_tier = camp.get("locked_tier") or 1
+        if locked_tier < 3:
+            return jsonify({"error": "min_entries is only available on the Scale plan", "tier_gate": "min_entries"}), 422
+        try:
+            min_entries = int(body["min_entries"])
+            if min_entries < 2:
+                raise ValueError
+        except (ValueError, TypeError):
+            return jsonify({"error": "min_entries must be an integer >= 2"}), 400
+
     raffle = create_raffle(
         campaign_id=campaign_id,
         prize_name=prize_name,
@@ -139,6 +153,7 @@ def create_campaign_raffle(campaign_id: str):
         prize_image_url=prize_image_url,
         compliance_ack_at=_now_utc(),
         prize_value_cents=prize_value_cents,
+        min_entries=min_entries,
     )
     return jsonify(_serialize_raffle(raffle)), 201
 
@@ -192,6 +207,22 @@ def update_campaign_raffle(campaign_id: str):
         except (ValueError, TypeError):
             return jsonify({"error": "prize_value_cents must be a positive integer"}), 400
 
+    if "min_entries" in body:
+        locked_tier = camp.get("locked_tier") or 1
+        if locked_tier < 3:
+            return jsonify({"error": "min_entries is only available on the Scale plan", "tier_gate": "min_entries"}), 422
+        raw_min = body["min_entries"]
+        if raw_min is None:
+            updates["min_entries"] = None
+        else:
+            try:
+                val = int(raw_min)
+                if val < 2:
+                    raise ValueError
+                updates["min_entries"] = val
+            except (ValueError, TypeError):
+                return jsonify({"error": "min_entries must be an integer >= 2 or null to remove"}), 400
+
     if not updates:
         return jsonify(_serialize_raffle(raffle)), 200
 
@@ -231,16 +262,81 @@ def get_raffle_entries_for_org(raffle_id: str):
             "id": row["id"],
             "drawn_at": row["drawn_at"].isoformat() if row.get("drawn_at") else None,
             "outcome": row["outcome"],
+            "triggered_by": row.get("triggered_by"),
             "notified_at": row["notified_at"].isoformat() if row.get("notified_at") else None,
             "claimed_at": row["claimed_at"].isoformat() if row.get("claimed_at") else None,
             "winner_email": claimed_winner_email,
         }
 
-    return jsonify({
+    response: dict = {
         "raffle": _serialize_raffle(raffle, include_winner_email=True),
         "entry_count": count,
         "draw_log": [_serialize_log(r) for r in draw_log],
-    }), 200
+    }
+
+    # Scale (locked_tier >= 3): include full entrant list
+    if (camp.get("locked_tier") or 1) >= 3:
+        def _serialize_entry(e: dict) -> dict:
+            return {
+                "id": e["id"],
+                "donor_email": e.get("donor_email"),
+                "donor_first_name": e.get("donor_first_name"),
+                "donor_last_name": e.get("donor_last_name"),
+                "display_consent": e.get("display_consent"),
+                "source": e.get("source"),
+                "voided": e.get("voided", False),
+                "void_reason": e.get("void_reason"),
+                "deletion_requested": e.get("deletion_requested", False),
+                "created_at": e["created_at"].isoformat() if e.get("created_at") else None,
+            }
+        entries = get_raffle_entries(raffle_id)
+        response["entries"] = [_serialize_entry(e) for e in entries]
+    else:
+        response["entries"] = None
+        response["entries_note"] = "Full entrant list is available on the Scale plan."
+
+    return jsonify(response), 200
+
+
+# ---------------------------------------------------------------------------
+# Manual draw
+# ---------------------------------------------------------------------------
+
+@raffle_bp.post("/api/orgs/raffles/<raffle_id>/manual-draw")
+@jwt_required()
+def manual_draw(raffle_id: str):
+    claims = get_jwt()
+    user_id = get_jwt_identity()
+    org_id = request.args.get("org_id") or claims.get("org_id")
+
+    raffle = get_raffle_by_id(raffle_id)
+    if not raffle:
+        return jsonify({"error": "not found"}), 404
+
+    camp = get_campaign(raffle["campaign_id"])
+    if not camp or camp.get("org_id") != org_id:
+        return jsonify({"error": "not found"}), 404
+
+    role = get_user_role_in_org(user_id, org_id)
+    if role not in ("owner", "admin"):
+        return jsonify({"error": "forbidden"}), 403
+
+    if raffle["status"] != "active":
+        return jsonify({"error": "raffle must be in active status to draw manually"}), 422
+    if camp.get("status") != "completed":
+        return jsonify({"error": "campaign must be completed before drawing manually"}), 422
+    if raffle.get("winner_entry_id"):
+        return jsonify({"error": "a winner has already been drawn"}), 422
+
+    from app.services.raffle_service import execute_raffle_draw
+    update_raffle(raffle_id, status="drawing")
+    try:
+        execute_raffle_draw(raffle_id, triggered_by="org_manual")
+    except Exception as e:
+        update_raffle(raffle_id, status="active")
+        return jsonify({"error": f"draw failed: {e}"}), 500
+
+    return jsonify({"ok": True}), 200
 
 
 # ---------------------------------------------------------------------------
@@ -271,10 +367,15 @@ def get_public_raffle(slug: str):
     if not raffle:
         return jsonify({"raffle": None}), 200
 
-    campaign_end_date = camp.get("ends_at") or camp.get("updated_at") or camp.get("created_at")
+    campaign_end_date = camp.get("ends_at") or None
+
+    from app.models.org import get_organization
+    org = get_organization(camp["org_id"])
+    org_timezone = (org or {}).get("timezone", "UTC") or "UTC"
 
     payload = _serialize_raffle(raffle)
     payload["campaign_end_date"] = campaign_end_date.isoformat() if campaign_end_date else None
+    payload["timezone"] = org_timezone
     payload["free_entry_url"] = f"/campaigns/{slug}/raffle/free-entry"
     payload["rules_url"] = f"/campaigns/{slug}/raffle/rules"
     payload["entry_count"] = get_entry_count(raffle["id"])
@@ -346,6 +447,16 @@ def submit_free_entry(slug: str):
     except Exception as e:
         print(f"[raffle] free_entry_confirmation email error: {e}", flush=True)
 
+    try:
+        from app.realtime import socketio
+        socketio.emit(
+            "raffle_entry",
+            {"campaign_id": str(camp["id"]), "raffle_id": str(raffle["id"])},
+            to=f"campaign:{camp['id']}",
+        )
+    except Exception as e:
+        print(f"[raffle] socketio emit raffle_entry (free) error: {e}", flush=True)
+
     return jsonify({"message": "You've been entered! Good luck."}), 201
 
 
@@ -388,6 +499,50 @@ def do_claim():
         return jsonify({"error": "Email does not match. Please check and try again."}), 400
 
     return jsonify(payload), status_code
+
+
+# ---------------------------------------------------------------------------
+# Deletion request (PIPEDA/GDPR)
+# ---------------------------------------------------------------------------
+
+@raffle_bp.post("/api/raffle-entries/deletion-request")
+def request_entry_deletion():
+    """
+    No-auth endpoint: flag entries for deletion (hold if active raffle, delete immediately if terminal).
+    Rate-limited to 3/hr per IP. Always returns 200 to avoid leaking whether email exists.
+    """
+    ip_key = f"raffle_deletion_request:{rate_limit_key()}"
+    if is_rate_limited(ip_key, limit=3, window_seconds=3600):
+        return rate_limit_exceeded_response(3)
+
+    body = request.get_json(force=True, silent=True) or {}
+    donor_email = (body.get("email") or "").strip().lower()
+    if not donor_email or "@" not in donor_email:
+        return jsonify({"ok": True}), 200
+
+    from app.models.raffle import (
+        mark_entry_deletion_requested,
+        get_entries_in_terminal_raffles_by_email,
+        hard_delete_entries_by_ids,
+    )
+    from app.services.raffle_email_service import send_deletion_confirmation_email
+
+    # Immediately delete entries in terminal raffles
+    terminal_entries = get_entries_in_terminal_raffles_by_email(donor_email)
+    if terminal_entries:
+        for entry in terminal_entries:
+            try:
+                raffle = get_raffle_by_id(entry["raffle_id"])
+                if raffle:
+                    send_deletion_confirmation_email(entry["donor_email"], raffle)
+            except Exception:
+                pass
+        hard_delete_entries_by_ids([e["id"] for e in terminal_entries])
+
+    # Flag entries in active raffles for deletion at raffle conclusion
+    mark_entry_deletion_requested(donor_email)
+
+    return jsonify({"ok": True}), 200
 
 
 # ---------------------------------------------------------------------------

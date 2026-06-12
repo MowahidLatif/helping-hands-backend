@@ -18,17 +18,18 @@ def create_raffle(
     prize_image_url: Optional[str],
     compliance_ack_at,
     prize_value_cents: Optional[int] = None,
+    min_entries: Optional[int] = None,
 ) -> Dict[str, Any]:
     sql = """
         INSERT INTO raffles
             (campaign_id, prize_name, prize_description, prize_image_url,
-             status, compliance_ack_at, prize_value_cents)
-        VALUES (%s, %s, %s, %s, 'active', %s, %s)
+             status, compliance_ack_at, prize_value_cents, min_entries)
+        VALUES (%s, %s, %s, %s, 'active', %s, %s, %s)
         RETURNING *
     """
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, (campaign_id, prize_name, prize_description,
-                          prize_image_url, compliance_ack_at, prize_value_cents))
+                          prize_image_url, compliance_ack_at, prize_value_cents, min_entries))
         row = cur.fetchone()
         conn.commit()
         return _row_to_dict(cur, row)
@@ -55,7 +56,7 @@ def update_raffle(raffle_id: str, **fields) -> Optional[Dict[str, Any]]:
         "prize_name", "prize_description", "prize_image_url", "status",
         "winner_entry_id", "redraw_count", "max_redraws",
         "claim_deadline", "ended_at", "prize_value_cents",
-        "void_redraws", "claim_token_used_at",
+        "void_redraws", "claim_token_used_at", "min_entries",
     }
     sets = {k: v for k, v in fields.items() if k in allowed}
     if not sets:
@@ -210,18 +211,95 @@ def get_valid_donation_count_for_entry(raffle_id: str, donor_email: str) -> int:
         return cur.fetchone()[0]
 
 
+def get_deletion_requested_entries(raffle_id: str) -> List[Dict[str, Any]]:
+    sql = "SELECT * FROM raffle_entries WHERE raffle_id = %s AND deletion_requested = true"
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (raffle_id,))
+        return [_row_to_dict(cur, r) for r in cur.fetchall()]
+
+
+def hard_delete_entries_by_ids(entry_ids: List[str]) -> int:
+    if not entry_ids:
+        return 0
+    placeholders = ", ".join("%s" for _ in entry_ids)
+    sql = f"DELETE FROM raffle_entries WHERE id IN ({placeholders})"
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, entry_ids)
+        deleted = cur.rowcount
+        conn.commit()
+        return deleted
+
+
+def get_all_entries_for_raffle(raffle_id: str) -> List[Dict[str, Any]]:
+    sql = "SELECT * FROM raffle_entries WHERE raffle_id = %s ORDER BY created_at ASC"
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (raffle_id,))
+        return [_row_to_dict(cur, r) for r in cur.fetchall()]
+
+
+def delete_all_entries_for_raffle(raffle_id: str) -> int:
+    sql = "DELETE FROM raffle_entries WHERE raffle_id = %s"
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (raffle_id,))
+        deleted = cur.rowcount
+        conn.commit()
+        return deleted
+
+
+def anonymize_draw_log(raffle_id: str) -> None:
+    sql = "UPDATE raffle_draw_log SET entry_id = NULL WHERE raffle_id = %s"
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (raffle_id,))
+        conn.commit()
+
+
+def mark_entry_deletion_requested(donor_email: str) -> int:
+    """Set deletion_requested=true for all non-terminal entries by this email."""
+    sql = """
+        UPDATE raffle_entries
+        SET deletion_requested = true
+        WHERE LOWER(donor_email) = LOWER(%s)
+          AND raffle_id IN (
+              SELECT id FROM raffles WHERE status = 'active'
+          )
+    """
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (donor_email,))
+        updated = cur.rowcount
+        conn.commit()
+        return updated
+
+
+def get_entries_in_terminal_raffles_by_email(donor_email: str) -> List[Dict[str, Any]]:
+    """Return entries in already-terminal raffles for this email (safe to hard-delete)."""
+    sql = """
+        SELECT e.* FROM raffle_entries e
+        JOIN raffles r ON r.id = e.raffle_id
+        WHERE LOWER(e.donor_email) = LOWER(%s)
+          AND r.status IN ('claimed', 'unclaimed', 'cancelled', 'cancelled_threshold')
+    """
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (donor_email,))
+        return [_row_to_dict(cur, r) for r in cur.fetchall()]
+
+
 # ---------------------------------------------------------------------------
 # Raffle Draw Log
 # ---------------------------------------------------------------------------
 
-def create_draw_log(raffle_id: str, entry_id: str, outcome: str = "notified") -> Dict[str, Any]:
+def create_draw_log(
+    raffle_id: str,
+    entry_id: str,
+    outcome: str = "notified",
+    triggered_by: str = "scheduler",
+) -> Dict[str, Any]:
     sql = """
-        INSERT INTO raffle_draw_log (raffle_id, entry_id, outcome)
-        VALUES (%s, %s, %s)
+        INSERT INTO raffle_draw_log (raffle_id, entry_id, outcome, triggered_by)
+        VALUES (%s, %s, %s, %s)
         RETURNING *
     """
     with get_db_connection() as conn, conn.cursor() as cur:
-        cur.execute(sql, (raffle_id, entry_id, outcome))
+        cur.execute(sql, (raffle_id, entry_id, outcome, triggered_by))
         row = cur.fetchone()
         conn.commit()
         return _row_to_dict(cur, row)
