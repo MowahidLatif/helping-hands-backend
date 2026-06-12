@@ -4,12 +4,12 @@ Revision ID: 0037_backfill_locked_tier
 Revises: 0036_raffle_part2_schema
 """
 
+from alembic import op
+
 revision = "0037_backfill_locked_tier"
 down_revision = "0036_raffle_part2_schema"
 branch_labels = None
 depends_on = None
-
-from alembic import op
 
 
 def upgrade():

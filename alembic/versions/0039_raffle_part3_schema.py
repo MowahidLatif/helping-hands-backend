@@ -4,12 +4,12 @@ Revision ID: 0039_raffle_part3_schema
 Revises: 0038_orgs_timezone
 """
 
+from alembic import op
+
 revision = "0039_raffle_part3_schema"
 down_revision = "0038_orgs_timezone"
 branch_labels = None
 depends_on = None
-
-from alembic import op
 
 
 def upgrade():
