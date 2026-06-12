@@ -9,11 +9,10 @@ from app.models.raffle import (
     get_raffle_by_id,
     update_raffle,
     upsert_raffle_entry,
-    get_raffle_entries,
     get_entry_count,
     get_draw_log_for_raffle,
 )
-from app.models.campaign import get_campaign, get_campaign_by_id
+from app.models.campaign import get_campaign
 from app.models.org_user import get_user_role_in_org
 from app.utils.tier_features import get_org_tier, TIER_LIMITS
 from app.utils.rate_limit import is_rate_limited, rate_limit_key, rate_limit_exceeded_response
@@ -244,10 +243,7 @@ def get_public_raffle(slug: str):
     if not raffle:
         return jsonify({"raffle": None}), 200
 
-    import os
     campaign_end_date = camp.get("updated_at") or camp.get("created_at")
-    goal = float(camp.get("goal") or 0)
-    total = float(camp.get("total_raised") or 0)
 
     payload = _serialize_raffle(raffle)
     payload["campaign_end_date"] = campaign_end_date.isoformat() if campaign_end_date else None

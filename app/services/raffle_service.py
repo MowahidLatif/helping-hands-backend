@@ -2,7 +2,7 @@ from __future__ import annotations
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Tuple, Dict, Any
+from typing import Tuple, Dict, Any
 
 from itsdangerous import URLSafeTimedSerializer, SignatureExpired, BadSignature
 
@@ -109,7 +109,6 @@ def trigger_raffle_draw_if_active(campaign_id: str) -> None:
 def process_expired_claims() -> int:
     """Nightly job: expire pending claims and trigger redraws. Returns count processed."""
     from app.services.raffle_email_service import (
-        send_raffle_org_winner_claimed,
         send_raffle_org_unclaimed,
     )
 

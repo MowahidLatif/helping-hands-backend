@@ -81,7 +81,7 @@ def send_raffle_org_winner_drawn(
         return
     prize = raffle.get("prize_name", "the prize")
     winner_email = winner_entry.get("donor_email", "unknown")
-    subject = f"A winner has been drawn for your raffle!"
+    subject = "A winner has been drawn for your raffle!"
     body = (
         f"Hi {org.get('name', 'there')},\n\n"
         f"A winner has been drawn for your raffle \"{prize}\".\n\n"
@@ -110,7 +110,7 @@ def send_raffle_org_winner_claimed(
         winner_entry.get("donor_first_name"),
         winner_entry.get("donor_last_name"),
     ])) or winner_email
-    subject = f"Your raffle winner has claimed their prize!"
+    subject = "Your raffle winner has claimed their prize!"
     body = (
         f"Hi {org.get('name', 'there')},\n\n"
         f"Your raffle winner for \"{prize}\" has claimed their prize!\n\n"
@@ -131,7 +131,7 @@ def send_raffle_org_unclaimed(raffle: Dict[str, Any], draw_count: int) -> None:
     if not owner_email:
         return
     prize = raffle.get("prize_name", "the prize")
-    subject = f"Your raffle ended with no winner claiming the prize"
+    subject = "Your raffle ended with no winner claiming the prize"
     body = (
         f"Hi {org.get('name', 'there')},\n\n"
         f"After {draw_count} draw(s), no winner claimed the raffle prize for \"{prize}\".\n\n"
@@ -150,7 +150,7 @@ def send_raffle_org_no_entries(raffle: Dict[str, Any]) -> None:
     if not owner_email:
         return
     prize = raffle.get("prize_name", "the prize")
-    subject = f"Your raffle ended with no entries"
+    subject = "Your raffle ended with no entries"
     body = (
         f"Hi {org.get('name', 'there')},\n\n"
         f"Your campaign ended with no entries in the raffle for \"{prize}\".\n"
