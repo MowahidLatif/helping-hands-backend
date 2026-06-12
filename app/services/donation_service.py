@@ -26,6 +26,7 @@ def start_checkout(
     amount: float,
     donor_email: str | None = None,
     message: str | None = None,
+    raffle_display_consent: bool = False,
 ) -> Dict[str, Any]:
     camp = get_campaign(campaign_id)
     if not camp:
@@ -96,6 +97,7 @@ def start_checkout(
             "base_amount_cents": str(base_amount_cents),
             "charge_amount_cents": str(charge_amount_cents),
             "donor_cover_amount_cents": str(donor_cover_amount_cents),
+            "raffle_display_consent": "1" if raffle_display_consent else "0",
         },
         "idempotency_key": donation["id"],
         "automatic_payment_methods": {"enabled": True},

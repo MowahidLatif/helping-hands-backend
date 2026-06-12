@@ -155,6 +155,40 @@ def _openai_chat_json(system: str, user: str) -> dict[str, Any]:
     return parsed
 
 
+def _inject_raffle_block_if_active(campaign_id: str, recipe: dict[str, Any]) -> None:
+    """Mutate recipe in-place: insert raffle_block after donate_section if campaign has active raffle."""
+    try:
+        from app.models.raffle import get_raffle_by_campaign
+        raffle = get_raffle_by_campaign(campaign_id)
+        if not raffle:
+            return
+        import uuid as _uuid
+        camp = get_campaign(campaign_id)
+        slug = (camp or {}).get("slug", campaign_id)
+        raffle_node = {
+            "id": f"raffle-{_uuid.uuid4().hex[:8]}",
+            "type": "raffle_block",
+            "props": {
+                "prize_name": raffle.get("prize_name"),
+                "prize_description": raffle.get("prize_description"),
+                "prize_image_url": raffle.get("prize_image_url"),
+                "status": raffle.get("status", "active"),
+                "campaign_end_date": None,
+                "winner_display_name": None,
+                "free_entry_url": f"/campaigns/{slug}/raffle/free-entry",
+            },
+        }
+        nodes = recipe.get("nodes", [])
+        donate_idx = next(
+            (i for i, n in enumerate(nodes) if n.get("type") == "donate_section"),
+            len(nodes) - 1,
+        )
+        nodes.insert(donate_idx + 1, raffle_node)
+        recipe["nodes"] = nodes
+    except Exception as e:
+        logger.warning("raffle block injection failed: %s", e)
+
+
 def generate_and_validate_recipe(
     *,
     user_prompt: str,
@@ -233,6 +267,7 @@ def run_generation_job(
             validated_theme = _validate_theme(theme)
             if validated_theme:
                 recipe["theme"] = validated_theme
+        _inject_raffle_block_if_active(campaign_id, recipe)
         update_job(
             job_id,
             step="Saving site recipe",

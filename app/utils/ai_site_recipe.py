@@ -41,6 +41,7 @@ ALLOWED_TYPES = frozenset(
         "progress_section",
         "footer",
         "spacer",
+        "raffle_block",
     }
 )
 
@@ -256,6 +257,18 @@ def _validate_props(node_type: str, props: dict[str, Any]) -> str | None:
         h = props.get("height_px")
         if h is not None and (not isinstance(h, (int, float)) or h < 0 or h > 400):
             return "spacer height_px must be between 0 and 400"
+        return None
+    if node_type == "raffle_block":
+        if not _is_optional_str(props.get("prize_name")):
+            return "raffle_block prize_name must be a string"
+        if not _is_optional_str(props.get("prize_description")):
+            return "raffle_block prize_description must be a string"
+        if not _is_optional_str(props.get("prize_image_url")):
+            return "raffle_block prize_image_url must be a string"
+        valid_statuses = {"active", "drawing", "winner_pending", "claimed", "unclaimed", "cancelled"}
+        status = props.get("status")
+        if status is not None and status not in valid_statuses:
+            return f"raffle_block status must be one of: {sorted(valid_statuses)}"
         return None
     return None
 

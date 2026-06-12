@@ -174,3 +174,9 @@ def run_billing_grace_expiry() -> int:
     """RQ/cron: restrict accounts after payment grace period."""
     from app.services.billing_service import process_payment_grace_expiry
     return process_payment_grace_expiry()
+
+
+def run_raffle_redraw_check() -> int:
+    """RQ/cron: expire pending raffle claims and trigger redraws."""
+    from app.services.raffle_service import process_expired_claims
+    return process_expired_claims()

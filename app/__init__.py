@@ -24,6 +24,7 @@ from app.routes import (
     waitlist_bp,
 )
 from app.routes.platform_routes import platform_bp
+from app.routes.raffle_routes import raffle_bp
 from app.realtime import init_socketio
 from app.utils.metrics import REQUEST_COUNT, REQUEST_DURATION_SECONDS, RATE_LIMIT_HITS
 
@@ -280,6 +281,7 @@ def create_app():
     app.register_blueprint(contact_bp)
     app.register_blueprint(platform_bp)
     app.register_blueprint(waitlist_bp, url_prefix="/api/waitlist")
+    app.register_blueprint(raffle_bp)
 
     if os.getenv("PRINT_URL_MAP", "0") == "1":
         _logger.info("=== URL MAP ===")

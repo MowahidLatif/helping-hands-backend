@@ -210,6 +210,25 @@ def _apply_status_update(
                 net_to_org_cents=accounting.net_to_org_cents,
             )
 
+    if new_status == "succeeded" and d and d.get("donor_email") and d.get("campaign_id"):
+        try:
+            from app.models.raffle import get_raffle_by_campaign, upsert_raffle_entry
+            raffle = get_raffle_by_campaign(d["campaign_id"])
+            if raffle and raffle["status"] == "active":
+                metadata = (event_obj or {}).get("metadata") or {}
+                display_consent = metadata.get("raffle_display_consent", "0") == "1"
+                upsert_raffle_entry(
+                    raffle_id=raffle["id"],
+                    donor_email=d["donor_email"],
+                    donor_first_name=d.get("donor_first_name"),
+                    donor_last_name=d.get("donor_last_name"),
+                    display_consent=display_consent,
+                    source="donation",
+                    donation_id=str(d["id"]),
+                )
+        except Exception as raffle_err:
+            print(f"[raffle entry upsert error] {raffle_err}", flush=True)
+
     cid = (d or {}).get("campaign_id") or campaign_id
     if not cid:
         return
@@ -226,6 +245,8 @@ def _apply_status_update(
             completed_now = complete_campaign_if_goal_reached(cid)
             if completed_now:
                 enqueue_campaign_payout(cid)
+                from app.services.raffle_service import trigger_raffle_draw_if_active
+                trigger_raffle_draw_if_active(cid)
         except Exception as completion_err:
             print("[campaign complete/payout error]", str(completion_err))
 
