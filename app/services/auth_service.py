@@ -83,6 +83,9 @@ def signup_user(data: dict) -> dict:
     ).strip() or None
     org_subdomain = (data.get("org_subdomain") or "").strip() or None
     org_timezone = (data.get("timezone") or "UTC").strip()[:64] or "UTC"
+    org_currency = (data.get("currency") or "usd").strip().lower()[:3] or "usd"
+    if org_currency not in ("usd", "cad"):
+        org_currency = "usd"
     try:
         org_tier = int(data.get("org_tier") or 1)
         if org_tier not in (1, 2, 3):
@@ -107,6 +110,7 @@ def signup_user(data: dict) -> dict:
         pending_tier=org_tier,
         subscription_status="none",
         timezone=org_timezone,
+        currency=org_currency,
     )
     add_user_to_org(org_id=org["id"], user_id=user["id"], role="owner")
 

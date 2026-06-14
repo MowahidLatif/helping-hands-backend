@@ -105,6 +105,18 @@ def get_org_member_emails(org_id: str) -> set:
 # Raffle Entries
 # ---------------------------------------------------------------------------
 
+def _normalize_phone(phone: Optional[str]) -> Optional[str]:
+    """Normalize phone to E.164-ish: strip non-digits, prepend +1 for 10-digit NA numbers."""
+    if not phone:
+        return None
+    digits = "".join(c for c in phone if c.isdigit())
+    if len(digits) == 10:
+        return f"+1{digits}"
+    if len(digits) == 11 and digits.startswith("1"):
+        return f"+{digits}"
+    return phone.strip()[:20] or None
+
+
 def upsert_raffle_entry(
     raffle_id: str,
     donor_email: str,
@@ -113,22 +125,25 @@ def upsert_raffle_entry(
     display_consent: bool,
     source: str,
     donation_id: Optional[str],
+    phone: Optional[str] = None,
 ) -> Dict[str, Any]:
+    normalized_phone = _normalize_phone(phone)
     sql = """
         INSERT INTO raffle_entries
             (raffle_id, donor_email, donor_first_name, donor_last_name,
-             display_consent, source, donation_id)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+             display_consent, source, donation_id, phone)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (raffle_id, donor_email)
         DO UPDATE SET
             display_consent = EXCLUDED.display_consent,
             donor_first_name = COALESCE(EXCLUDED.donor_first_name, raffle_entries.donor_first_name),
-            donor_last_name  = COALESCE(EXCLUDED.donor_last_name,  raffle_entries.donor_last_name)
+            donor_last_name  = COALESCE(EXCLUDED.donor_last_name,  raffle_entries.donor_last_name),
+            phone = COALESCE(EXCLUDED.phone, raffle_entries.phone)
         RETURNING *
     """
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, (raffle_id, donor_email, donor_first_name,
-                          donor_last_name, display_consent, source, donation_id))
+                          donor_last_name, display_consent, source, donation_id, normalized_phone))
         row = cur.fetchone()
         conn.commit()
         return _row_to_dict(cur, row)
@@ -150,11 +165,12 @@ def get_entry_count(raffle_id: str) -> int:
 
 
 def get_undrawn_entries(raffle_id: str) -> List[Dict[str, Any]]:
-    """Return valid (non-voided) entries that have never been drawn."""
+    """Return valid (non-voided, non-deletion-requested) entries that have never been drawn."""
     sql = """
         SELECT e.* FROM raffle_entries e
         WHERE e.raffle_id = %s
           AND e.voided = false
+          AND e.deletion_requested = false
           AND e.id NOT IN (
               SELECT entry_id FROM raffle_draw_log WHERE raffle_id = %s
           )
@@ -305,18 +321,31 @@ def create_draw_log(
         return _row_to_dict(cur, row)
 
 
-def update_draw_log(log_id: str, outcome: str, claimed_at=None) -> Optional[Dict[str, Any]]:
+def update_draw_log(log_id: str, outcome: str, claimed_at=None, expire_reason: Optional[str] = None) -> Optional[Dict[str, Any]]:
     sql = """
         UPDATE raffle_draw_log
-        SET outcome = %s, claimed_at = %s
+        SET outcome = %s, claimed_at = %s, expire_reason = %s
         WHERE id = %s
         RETURNING *
     """
     with get_db_connection() as conn, conn.cursor() as cur:
-        cur.execute(sql, (outcome, claimed_at, log_id))
+        cur.execute(sql, (outcome, claimed_at, expire_reason, log_id))
         row = cur.fetchone()
         conn.commit()
         return _row_to_dict(cur, row) if row else None
+
+
+def get_draw_log_by_winner_email(email: str) -> List[Dict[str, Any]]:
+    """Return draw log rows where the entry's email matches and outcome is 'notified'."""
+    sql = """
+        SELECT dl.* FROM raffle_draw_log dl
+        JOIN raffle_entries e ON e.id = dl.entry_id
+        WHERE LOWER(e.donor_email) = LOWER(%s)
+          AND dl.outcome = 'notified'
+    """
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (email,))
+        return [_row_to_dict(cur, r) for r in cur.fetchall()]
 
 
 def get_current_draw_log(raffle_id: str) -> Optional[Dict[str, Any]]:

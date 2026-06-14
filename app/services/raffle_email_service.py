@@ -296,6 +296,29 @@ def send_raffle_purge_notifications(raffle: Dict[str, Any], emails: list) -> Non
                 print(f"[purge email] {to_email}: {e}", flush=True)
 
 
+def send_raffle_payment_retry_email(
+    donor_email: str,
+    campaign: Dict[str, Any],
+    raffle: Dict[str, Any],
+) -> None:
+    """Notify donor their payment failed so they haven't been entered in the raffle."""
+    prize = raffle.get("prize_name", "the prize")
+    campaign_title = campaign.get("title", "the campaign")
+    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+    slug = campaign.get("slug") or campaign.get("id", "")
+    donate_url = f"{frontend_url}/donate/{slug}"
+    subject = f"Your donation to {campaign_title} didn't go through"
+    body = (
+        f"Hi,\n\n"
+        f"Your donation to \"{campaign_title}\" didn't complete, so you haven't been entered in the raffle for \"{prize}\" yet.\n\n"
+        f"Want to try again? Donate here:\n{donate_url}\n\n"
+        f"If you have any questions, reply to this email.\n\n"
+        f"— The HelpingHandsFund Team\n"
+    )
+    org_id = campaign.get("org_id")
+    _send(donor_email, subject, body, org_id=org_id)
+
+
 def send_raffle_free_entry_confirmation(
     entry: Dict[str, Any],
     raffle: Dict[str, Any],

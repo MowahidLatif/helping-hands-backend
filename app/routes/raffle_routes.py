@@ -24,6 +24,7 @@ from app.services.raffle_service import (
     RAFFLE_CLAIM_WINDOW_HOURS,
 )
 from app.utils.db import get_db_connection
+from app.utils.raffle_feature import is_raffle_enabled_for_org
 
 raffle_bp = Blueprint("raffles", __name__)
 
@@ -96,6 +97,9 @@ def create_campaign_raffle(campaign_id: str):
     role = get_user_role_in_org(user_id, org_id)
     if role not in ("owner", "admin"):
         return jsonify({"error": "forbidden"}), 403
+
+    if not is_raffle_enabled_for_org(org_id):
+        return jsonify({"error": "Raffle feature is not yet available for your organization."}), 403
 
     tier = get_org_tier(org_id)
     if not TIER_LIMITS.get(tier, {}).get("raffle"):
@@ -172,6 +176,9 @@ def update_campaign_raffle(campaign_id: str):
     role = get_user_role_in_org(user_id, org_id)
     if role not in ("owner", "admin"):
         return jsonify({"error": "forbidden"}), 403
+
+    if not is_raffle_enabled_for_org(org_id):
+        return jsonify({"error": "Raffle feature is not yet available for your organization."}), 403
 
     raffle = get_raffle_by_campaign(campaign_id)
     if not raffle:
@@ -340,6 +347,15 @@ def manual_draw(raffle_id: str):
 
 
 # ---------------------------------------------------------------------------
+# Feature flag status (public — frontend checks once per session)
+# ---------------------------------------------------------------------------
+
+@raffle_bp.get("/api/orgs/<org_id>/raffle-feature-status")
+def raffle_feature_status(org_id: str):
+    return jsonify({"enabled": is_raffle_enabled_for_org(org_id)}), 200
+
+
+# ---------------------------------------------------------------------------
 # Public routes
 # ---------------------------------------------------------------------------
 
@@ -417,6 +433,7 @@ def submit_free_entry(slug: str):
     donor_email = (body.get("email") or "").strip().lower()
     donor_first_name = (body.get("first_name") or "").strip() or None
     donor_last_name = (body.get("last_name") or "").strip() or None
+    phone = (body.get("phone") or "").strip() or None
 
     if not donor_email or "@" not in donor_email:
         return jsonify({"error": "a valid email is required"}), 400
@@ -439,6 +456,7 @@ def submit_free_entry(slug: str):
         display_consent=False,
         source="free_entry",
         donation_id=None,
+        phone=phone,
     )
 
     try:

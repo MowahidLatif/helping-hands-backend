@@ -245,6 +245,47 @@ def task_send_non_winner_emails(raffle_id: str) -> None:
             logger.error("send non-winner email to %s: %s", entry.get("donor_email"), e)
 
 
+def finalize_campaign_after_buffer(campaign_id: str) -> None:
+    """Called ~15 min after a campaign enters 'closing' state. Completes + triggers draw/payout."""
+    from app.models.campaign import force_complete_campaign
+
+    did_complete = force_complete_campaign(campaign_id)
+    if not did_complete:
+        return
+
+    try:
+        enqueue_campaign_payout(campaign_id)
+    except Exception as e:
+        logger.error("finalize payout error campaign=%s: %s", campaign_id, e)
+
+    try:
+        from app.services.raffle_service import trigger_raffle_draw_if_active
+        trigger_raffle_draw_if_active(campaign_id)
+    except Exception as e:
+        logger.error("finalize raffle draw error campaign=%s: %s", campaign_id, e)
+
+    try:
+        from app.realtime import socketio
+        socketio.emit("campaign_completed", {"campaign_id": str(campaign_id)}, to=f"campaign:{campaign_id}")
+    except Exception as e:
+        logger.warning("campaign_completed socket emit error campaign=%s: %s", campaign_id, e)
+
+
+def schedule_campaign_finalization(campaign_id: str) -> None:
+    """Enqueue finalize_campaign_after_buffer to run in 15 minutes."""
+    from datetime import timedelta
+    try:
+        from redis import Redis
+        from rq import Queue
+        conn = Redis.from_url(REDIS_URL, decode_responses=False)
+        Queue("default", connection=conn).enqueue_in(
+            timedelta(minutes=15), finalize_campaign_after_buffer, campaign_id
+        )
+    except Exception as e:
+        logger.warning("Could not schedule campaign finalization for %s: %s", campaign_id, e)
+        finalize_campaign_after_buffer(campaign_id)
+
+
 def _enqueue_hourly(fn) -> None:
     """Re-enqueue fn to run again in 1 hour via RQ built-in scheduler."""
     from datetime import timedelta

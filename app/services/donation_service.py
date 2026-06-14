@@ -29,12 +29,13 @@ def start_checkout(
     raffle_display_consent: bool = False,
     donor_first_name: str | None = None,
     donor_last_name: str | None = None,
+    phone: str | None = None,
 ) -> Dict[str, Any]:
     camp = get_campaign(campaign_id)
     if not camp:
         return {"error": "campaign not found"}
     campaign_status = (camp.get("status") or "").strip().lower()
-    if campaign_status != "active":
+    if campaign_status not in ("active",):
         return {"error": "campaign is not accepting donations"}
     campaign_goal = float(camp.get("goal") or 0)
     campaign_total = float(camp.get("total_raised") or 0)
@@ -51,11 +52,12 @@ def start_checkout(
         charge_amount_cents = compute_gross_charge_for_donor_cover(base_amount_cents)
     donor_cover_amount_cents = max(0, charge_amount_cents - base_amount_cents)
 
+    campaign_currency = (camp.get("currency") or CURRENCY or "usd").lower()
     donation = create_donation(
         org_id=camp["org_id"],
         campaign_id=campaign_id,
         amount_cents=base_amount_cents,
-        currency=CURRENCY,
+        currency=campaign_currency,
         donor_email=(donor_email or None),
         message=(message or None),
         donor_first_name=(donor_first_name or None),
@@ -91,7 +93,7 @@ def start_checkout(
     stripe.api_key = STRIPE_SECRET
     pi_payload: Dict[str, Any] = {
         "amount": charge_amount_cents,
-        "currency": CURRENCY,
+        "currency": campaign_currency,
         "metadata": {
             "donation_id": donation["id"],
             "campaign_id": campaign_id,
@@ -104,6 +106,7 @@ def start_checkout(
             "raffle_display_consent": "1" if raffle_display_consent else "0",
             "donor_first_name": (donor_first_name or "")[:100],
             "donor_last_name": (donor_last_name or "")[:100],
+            "raffle_phone": (phone or "")[:20],
         },
         "idempotency_key": donation["id"],
         "automatic_payment_methods": {"enabled": True},

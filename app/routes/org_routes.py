@@ -8,6 +8,7 @@ from app.models.org import (
     update_organization_name,
     update_org_tier,
     update_org_timezone,
+    update_org_currency,
     delete_organization,
     upsert_org_payout_account,
 )
@@ -93,6 +94,7 @@ def rename_org(org_id):
     data = request.json or {}
     name = data.get("name")
     timezone = data.get("timezone")
+    currency = data.get("currency")
 
     if name:
         org = update_organization_name(org_id, str(name).strip())
@@ -104,8 +106,13 @@ def rename_org(org_id):
         if not org:
             return jsonify({"error": "not found"}), 404
 
-    if not name and not timezone:
-        return jsonify({"error": "name or timezone required"}), 400
+    if currency:
+        result = update_org_currency(org_id, str(currency).strip())
+        if result is None:
+            return jsonify({"error": "Currency cannot be changed after your first campaign is published."}), 409
+
+    if not name and not timezone and not currency:
+        return jsonify({"error": "name, timezone, or currency required"}), 400
 
     return jsonify(get_organization(org_id)), 200
 

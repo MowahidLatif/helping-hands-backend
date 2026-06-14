@@ -2,7 +2,7 @@ from app.utils.db import get_db_connection
 from typing import Any
 from app.utils.slug import slugify, slugify_with_fallback
 
-VALID_CAMPAIGN_STATUSES = {"draft", "active", "paused", "completed", "archived"}
+VALID_CAMPAIGN_STATUSES = {"draft", "active", "paused", "closing", "completed", "archived"}
 
 
 def is_fee_option_locked(status: str | None) -> bool:
@@ -111,19 +111,21 @@ def create_campaign(
     fee_option: str = "donor_pays",
     fee_policy_version: str = "v1",
     locked_tier: int = 1,
+    currency: str = "usd",
 ) -> dict[str, Any]:
     slug = unique_slug_for_org(org_id, title)
     normalized_status = (status or "draft").strip().lower()
     locked_tier_val = int(locked_tier) if locked_tier in (1, 2, 3) else 1
+    cur_code = (currency or "usd").strip().lower()[:3] or "usd"
     sql = """
     INSERT INTO campaigns (
       org_id, title, slug, goal, status, custom_domain, giveaway_prize_cents,
-      fee_option, fee_policy_version, locked_tier
+      fee_option, fee_policy_version, locked_tier, currency
     )
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     RETURNING id, org_id, title, slug, goal, status, custom_domain, total_raised,
               fee_option, fee_policy_version, giveaway_prize_cents, locked_tier,
-              created_at, updated_at
+              currency, created_at, updated_at
     """
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -139,6 +141,7 @@ def create_campaign(
                 fee_option,
                 fee_policy_version,
                 locked_tier_val,
+                cur_code,
             ),
         )
         row = cur.fetchone()
@@ -156,6 +159,7 @@ def create_campaign(
             "fee_policy_version",
             "giveaway_prize_cents",
             "locked_tier",
+            "currency",
             "created_at",
             "updated_at",
         ]
@@ -167,7 +171,7 @@ def get_campaign(campaign_id: str) -> dict[str, Any] | None:
              fee_option, fee_policy_version,
              platform_fee_cents, platform_fee_percent, platform_fee_recorded_at,
              giveaway_prize_cents, page_layout, ai_site_recipe, locked_tier,
-             ends_at, created_at, updated_at
+             ends_at, currency, created_at, updated_at
              FROM campaigns WHERE id = %s"""
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, (campaign_id,))
@@ -193,6 +197,7 @@ def get_campaign(campaign_id: str) -> dict[str, Any] | None:
             "ai_site_recipe",
             "locked_tier",
             "ends_at",
+            "currency",
             "created_at",
             "updated_at",
         ]
@@ -249,7 +254,7 @@ def list_campaigns(
            fee_option, fee_policy_version,
            platform_fee_cents, platform_fee_percent, platform_fee_recorded_at,
            giveaway_prize_cents, page_layout, ai_site_recipe, locked_tier,
-           created_at, updated_at
+           currency, created_at, updated_at
     FROM campaigns
     WHERE org_id = %s
     """
@@ -280,6 +285,7 @@ def list_campaigns(
             "page_layout",
             "ai_site_recipe",
             "locked_tier",
+            "currency",
             "created_at",
             "updated_at",
         ]
@@ -400,22 +406,23 @@ def recompute_total_raised(campaign_id: str) -> dict[str, Any]:
 
 def complete_campaign_if_goal_reached(campaign_id: str) -> bool:
     """
-    Mark campaign as completed when active campaign reaches goal.
-    Returns True only when a transition active -> completed occurred.
+    Transition active -> closing when campaign reaches goal (triggers 15-min buffer).
+    Returns True only when the transition occurred.
     """
     sql = """
     UPDATE campaigns
-    SET status = 'completed',
+    SET status = 'closing',
         updated_at = now()
     WHERE id = %s
       AND status = 'active'
       AND goal > 0
       AND total_raised >= goal
+    RETURNING id
     """
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, (campaign_id,))
         conn.commit()
-        return cur.rowcount > 0
+        return cur.fetchone() is not None
 
 
 def force_complete_campaign(campaign_id: str) -> bool:
@@ -423,12 +430,26 @@ def force_complete_campaign(campaign_id: str) -> bool:
     sql = """
     UPDATE campaigns
     SET status = 'completed', updated_at = now()
-    WHERE id = %s AND status = 'active'
+    WHERE id = %s AND status IN ('active', 'closing')
     """
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(sql, (campaign_id,))
         conn.commit()
         return cur.rowcount > 0
+
+
+def close_campaign_for_settlement(campaign_id: str) -> bool:
+    """Transition active -> closing (15-min buffer before completion). Returns True if transitioned."""
+    sql = """
+    UPDATE campaigns
+    SET status = 'closing', updated_at = now()
+    WHERE id = %s AND status = 'active'
+    RETURNING id
+    """
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (campaign_id,))
+        conn.commit()
+        return cur.fetchone() is not None
 
 
 def get_active_campaigns_past_end_date() -> list[str]:

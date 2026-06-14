@@ -10,7 +10,7 @@ _ORG_SELECT_COLS = """
   stripe_customer_id, stripe_subscription_id, subscription_status,
   subscription_current_period_end, pending_tier,
   subscription_cancel_at_period_end, subscription_cancel_at,
-  billing_interval, trial_ends_at, payment_grace_ends_at, timezone
+  billing_interval, trial_ends_at, payment_grace_ends_at, timezone, currency
 """
 
 
@@ -37,6 +37,7 @@ def _row_to_org(row: tuple) -> dict[str, Any]:
         "trial_ends_at": row[18],
         "payment_grace_ends_at": row[19],
         "timezone": row[20] or "UTC",
+        "currency": (row[21] or "usd").lower(),
     }
 
 
@@ -48,22 +49,24 @@ def create_organization(
     pending_tier: int | None = None,
     subscription_status: str = "none",
     timezone: str = "UTC",
+    currency: str = "usd",
 ):
     sub = _slugify(subdomain or name) or f"org-{secrets.token_hex(3)}"
     tier = int(tier) if tier in (1, 2, 3) else 1
     pending = int(pending_tier) if pending_tier in (1, 2, 3) else None
     status = (subscription_status or "none").strip().lower()
     tz = (timezone or "UTC").strip()[:64] or "UTC"
+    cur_code = (currency or "usd").strip().lower()[:3] or "usd"
 
     with get_db_connection() as conn, conn.cursor() as cur:
         cur.execute(
             """
             INSERT INTO organizations (
-              name, subdomain, tier, pending_tier, subscription_status, timezone
-            ) VALUES (%s, %s, %s, %s, %s, %s)
+              name, subdomain, tier, pending_tier, subscription_status, timezone, currency
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
             RETURNING id, name, subdomain, tier, pending_tier, subscription_status
             """,
-            (name, sub, tier, pending, status, tz),
+            (name, sub, tier, pending, status, tz, cur_code),
         )
         row = cur.fetchone()
         conn.commit()
@@ -102,6 +105,27 @@ def get_organization_by_connect_account(account_id: str) -> dict[str, Any] | Non
         cur.execute(sql, (account_id,))
         row = cur.fetchone()
         return _row_to_org(row) if row else None
+
+
+def update_org_currency(org_id: str, currency: str) -> dict[str, Any] | None:
+    """Update org currency. Rejected (returns None) if any published campaign exists."""
+    cur_code = (currency or "usd").strip().lower()[:3] or "usd"
+    if cur_code not in ("usd", "cad"):
+        return None
+    with get_db_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT 1 FROM campaigns WHERE org_id = %s AND status != 'draft' LIMIT 1",
+            (org_id,),
+        )
+        if cur.fetchone():
+            return None
+        cur.execute(
+            "UPDATE organizations SET currency = %s, updated_at = now() WHERE id = %s RETURNING id, currency",
+            (cur_code, org_id),
+        )
+        row = cur.fetchone()
+        conn.commit()
+        return {"id": row[0], "currency": row[1]} if row else None
 
 
 def update_org_tier(org_id: str, tier: int) -> dict[str, Any] | None:

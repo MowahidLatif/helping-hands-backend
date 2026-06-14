@@ -175,7 +175,7 @@ def process_expired_claims() -> int:
         raffle_id = raffle["id"]
         log = get_current_draw_log(raffle_id)
         if log and log["outcome"] == "notified":
-            update_draw_log(log["id"], outcome="expired")
+            update_draw_log(log["id"], outcome="expired", expire_reason="deadline")
 
         new_redraw_count = int(raffle.get("redraw_count") or 0) + 1
         max_redraws = int(raffle.get("max_redraws") or 5)
@@ -198,22 +198,23 @@ def process_expired_claims() -> int:
 
 
 def run_campaign_end_date_check() -> int:
-    """Hourly job: complete campaigns whose ends_at has passed, then trigger payout + raffle draw."""
-    from app.models.campaign import get_active_campaigns_past_end_date, force_complete_campaign
-    from app.tasks import enqueue_campaign_payout
+    """Hourly job: close campaigns whose ends_at has passed (starts 15-min settlement buffer)."""
+    from app.models.campaign import get_active_campaigns_past_end_date, close_campaign_for_settlement
+    from app.tasks import schedule_campaign_finalization
+    from app.realtime import socketio
 
     count = 0
     for campaign_id in get_active_campaigns_past_end_date():
-        did_complete = force_complete_campaign(campaign_id)
-        if did_complete:
+        did_close = close_campaign_for_settlement(campaign_id)
+        if did_close:
             try:
-                enqueue_campaign_payout(campaign_id)
+                socketio.emit("campaign_closing", {"campaign_id": str(campaign_id)}, to=f"campaign:{campaign_id}")
             except Exception as e:
-                print(f"[end-date payout error] campaign={campaign_id}: {e}", flush=True)
+                print(f"[campaign_closing socket error] campaign={campaign_id}: {e}", flush=True)
             try:
-                trigger_raffle_draw_if_active(campaign_id)
+                schedule_campaign_finalization(campaign_id)
             except Exception as e:
-                print(f"[end-date raffle draw error] campaign={campaign_id}: {e}", flush=True)
+                print(f"[end-date schedule finalization error] campaign={campaign_id}: {e}", flush=True)
             count += 1
     return count
 

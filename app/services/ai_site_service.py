@@ -182,6 +182,7 @@ def _inject_raffle_block_if_active(campaign_id: str, recipe: dict[str, Any]) -> 
                 "prize_description": raffle.get("prize_description"),
                 "prize_image_url": raffle.get("prize_image_url"),
                 "prize_value_cents": raffle.get("prize_value_cents"),
+                "currency": (camp or {}).get("currency", "usd") or "usd",
                 "status": raffle.get("status", "active"),
                 "campaign_end_date": camp_end.isoformat() if camp_end else None,
                 "timezone": org_timezone,

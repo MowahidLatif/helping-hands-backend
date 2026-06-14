@@ -148,6 +148,33 @@ def _resolve_event_context(
     return pi_id, donation_id, campaign_id
 
 
+def _maybe_send_raffle_retry_email(donor_email: str, campaign_id: str) -> None:
+    """Send one payment-failed retry email per email/campaign per 24h if raffle is active."""
+    import hashlib as _hashlib
+    from app.models.raffle import get_raffle_by_campaign
+    from app.models.campaign import get_campaign as _get_campaign
+    from app.services.raffle_email_service import send_raffle_payment_retry_email
+
+    raffle = get_raffle_by_campaign(campaign_id)
+    if not raffle or raffle.get("status") != "active":
+        return
+
+    key_hash = _hashlib.sha256(donor_email.lower().encode()).hexdigest()[:16]
+    redis_key = f"raffle_retry_email:{campaign_id}:{key_hash}"
+    try:
+        rdb = r()
+        if rdb.get(redis_key):
+            return
+        rdb.setex(redis_key, 86400, "1")
+    except Exception as e:
+        print(f"[raffle retry email redis] {e}", flush=True)
+
+    campaign = _get_campaign(campaign_id)
+    if not campaign:
+        return
+    send_raffle_payment_retry_email(donor_email, campaign, raffle)
+
+
 def _apply_status_update(
     *,
     pi_id: str | None,
@@ -233,6 +260,7 @@ def _apply_status_update(
                 if donor_email_lower not in member_emails:
                     metadata = (event_obj or {}).get("metadata") or {}
                     display_consent = metadata.get("raffle_display_consent", "0") == "1"
+                    raffle_phone = (metadata.get("raffle_phone") or "").strip() or None
                     upsert_raffle_entry(
                         raffle_id=raffle["id"],
                         donor_email=d["donor_email"],
@@ -241,6 +269,7 @@ def _apply_status_update(
                         display_consent=display_consent,
                         source="donation",
                         donation_id=str(d["id"]),
+                        phone=raffle_phone,
                     )
                     try:
                         socketio.emit(
@@ -252,6 +281,12 @@ def _apply_status_update(
                         print(f"[raffle] socketio emit raffle_entry error: {se}", flush=True)
         except Exception as raffle_err:
             print(f"[raffle entry upsert error] {raffle_err}", flush=True)
+
+    if new_status == "failed" and d and d.get("donor_email") and d.get("campaign_id"):
+        try:
+            _maybe_send_raffle_retry_email(d["donor_email"], d["campaign_id"])
+        except Exception as retry_err:
+            print(f"[raffle retry email error] {retry_err}", flush=True)
 
     cid = (d or {}).get("campaign_id") or campaign_id
     if not cid:
@@ -266,11 +301,14 @@ def _apply_status_update(
 
     if new_status == "succeeded":
         try:
-            completed_now = complete_campaign_if_goal_reached(cid)
-            if completed_now:
-                enqueue_campaign_payout(cid)
-                from app.services.raffle_service import trigger_raffle_draw_if_active
-                trigger_raffle_draw_if_active(cid)
+            closing_now = complete_campaign_if_goal_reached(cid)
+            if closing_now:
+                try:
+                    socketio.emit("campaign_closing", {"campaign_id": str(cid)}, to=f"campaign:{cid}")
+                except Exception as se:
+                    print(f"[campaign_closing socket error] {se}", flush=True)
+                from app.tasks import schedule_campaign_finalization
+                schedule_campaign_finalization(cid)
         except Exception as completion_err:
             print("[campaign complete/payout error]", str(completion_err))
 

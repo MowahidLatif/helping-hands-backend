@@ -161,6 +161,9 @@ def create():
         if not ok:
             return jsonify({"error": err}), 400
     try:
+        from app.models.org import get_organization
+        org = get_organization(org_id)
+        org_currency = (org or {}).get("currency", "usd") or "usd"
         camp = create_campaign(
             org_id=org_id,
             title=title,
@@ -170,6 +173,7 @@ def create():
             giveaway_prize_cents=giveaway_prize_cents,
             fee_option=fee_option,
             locked_tier=locked_tier,
+            currency=org_currency,
         )
         return jsonify(camp), 201
     except Exception as e:
