@@ -20,7 +20,7 @@ from app.utils.cache import r
 from app.utils.public_campaign_cache import invalidate_public_campaign_cache
 from app.realtime import socketio
 from app.models.stripe_event import mark_event_processed
-from app.tasks import enqueue_receipt_email, enqueue_campaign_payout
+from app.tasks import enqueue_receipt_email
 from app.services.fee_policy_service import (
     build_donation_accounting,
     estimate_stripe_processing_fee_cents,

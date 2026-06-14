@@ -1,7 +1,5 @@
 from __future__ import annotations
 import os
-import hashlib
-import hmac
 import base64
 
 HARD_BOUNCE_EVENTS = {"bounce", "blocked"}
